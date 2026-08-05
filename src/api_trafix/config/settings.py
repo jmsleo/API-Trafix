@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,10 +15,16 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = True
 
-    database_url: str = Field(validation_alias="DATABASE_URL")
-    redis_url: str = Field(validation_alias="REDIS_URL")
+    database_url: str = Field(default="", validation_alias="DATABASE_URL")
+    redis_url: str = Field(default="", validation_alias="REDIS_URL")
     redis_session_expire: int = 3600
     redis_cache_expire: int = 300
+
+    @model_validator(mode="after")
+    def _validate_required(self):
+        if not self.database_url or not self.redis_url:
+            raise ValueError("DATABASE_URL and REDIS_URL must be set in .env")
+        return self
 
 
 @lru_cache
