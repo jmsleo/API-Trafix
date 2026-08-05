@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:17
+    container_name: api-trafix-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trafix
+      POSTGRES_PASSWORD: trafix
+      POSTGRES_DB: trafix
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: api-trafix-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
