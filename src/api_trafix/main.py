@@ -7,6 +7,8 @@ from api_trafix.config.database import init_db
 from api_trafix.config.redis import close_redis
 from api_trafix import models
 
+from api_trafix.routes.users import router as users_router
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -27,6 +29,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+app.include_router(users_router)
 
 @app.get("/")
 async def root():
