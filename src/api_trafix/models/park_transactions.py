@@ -7,7 +7,6 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api_trafix.config.database import Base
-from api_trafix.models.payments import Payment
 
 
 class ParkingStatus(enum.Enum):

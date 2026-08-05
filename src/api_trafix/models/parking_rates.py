@@ -6,9 +6,8 @@ from sqlalchemy import String, Integer, ForeignKey, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from api_trafix.config.database import Base 
-from api_trafix.models.parking_rate_tiers import ParkingRateTier
-from src.api_trafix.models.vehicle_types import VehicleType
+from api_trafix.config.database import Base
+from api_trafix.models.vehicle_types import VehicleType
 
 
 class ParkingRate(Base):

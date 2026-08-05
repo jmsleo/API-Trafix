@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from api_trafix.models.members import Member
 from api_trafix.models.vehicle_types import VehicleType
-from src.api_trafix.config.database import Base 
+from api_trafix.config.database import Base
 
 
 class MemberVehicle(Base):
