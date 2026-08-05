@@ -6,7 +6,6 @@ from sqlalchemy import Enum, DateTime, ForeignKey, String, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from api_trafix.models.park_transactions import ParkTransaction
 from api_trafix.config.database import Base
 
 
