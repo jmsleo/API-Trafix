@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     app_name: str = "api-trafix"
     app_env: str = "development"
+    app_version: str = "1.0.0"
     debug: bool = True
 
     database_url: str = Field(validation_alias="DATABASE_URL")
