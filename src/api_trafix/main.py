@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api_trafix.config.settings import get_settings
 from api_trafix.config.database import init_db
 from api_trafix.config.redis import close_redis
+from api_trafix import models
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

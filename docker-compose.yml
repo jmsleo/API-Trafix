@@ -22,6 +22,15 @@ services:
     volumes:
       - redisdata:/data
 
+  adminer:
+    image: adminer:latest
+    container_name: api-trafix-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
 volumes:
   pgdata:
   redisdata:
