@@ -3,13 +3,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from api_trafix.schemas.common import NonNegativeInt, PositiveInt, ShortName
+
 
 class SubscriptionPlanBase(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
-    name: str
-    duration_in_days: int
-    price: int
+    name: ShortName
+    duration_in_days: PositiveInt
+    price: NonNegativeInt
     is_active: bool = True
 
 
@@ -18,11 +20,11 @@ class SubscriptionPlanCreate(SubscriptionPlanBase):
 
 
 class SubscriptionPlanUpdate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
-    name: str | None = None
-    duration_in_days: int | None = None
-    price: int | None = None
+    name: ShortName | None = None
+    duration_in_days: PositiveInt | None = None
+    price: NonNegativeInt | None = None
     is_active: bool | None = None
 
 

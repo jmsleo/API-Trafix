@@ -4,6 +4,12 @@ from api_trafix.schemas.audit_log import (
     AuditLogRead,
     AuditLogUpdate,
 )
+from api_trafix.schemas.auth import (
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    TokenPair,
+)
 from api_trafix.schemas.device import DeviceBase, DeviceCreate, DeviceRead, DeviceUpdate
 from api_trafix.schemas.gate import GateBase, GateCreate, GateRead, GateUpdate
 from api_trafix.schemas.member import MemberBase, MemberCreate, MemberRead, MemberUpdate
@@ -75,6 +81,10 @@ __all__ = [
     "AuditLogCreate",
     "AuditLogRead",
     "AuditLogUpdate",
+    "LoginRequest",
+    "LogoutRequest",
+    "RefreshRequest",
+    "TokenPair",
     "DeviceBase",
     "DeviceCreate",
     "DeviceRead",

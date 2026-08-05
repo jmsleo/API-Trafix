@@ -4,12 +4,13 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from api_trafix.models.gates import GateStatus, GateType
+from api_trafix.schemas.common import Name
 
 
 class GateBase(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
-    name: str
+    name: Name
     type: GateType
     status: GateStatus
 
@@ -19,9 +20,9 @@ class GateCreate(GateBase):
 
 
 class GateUpdate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
-    name: str | None = None
+    name: Name | None = None
     type: GateType | None = None
     status: GateStatus | None = None
 
