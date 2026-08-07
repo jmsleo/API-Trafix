@@ -13,6 +13,7 @@ from api_trafix.config.settings import get_settings
 from api_trafix.core.middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
+from api_trafix.routes import member, vehicle_type, shift
 
 
 @asynccontextmanager
@@ -72,7 +73,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 app.include_router(auth_router)
 app.include_router(users_router)
-
+app.include_router(vehicle_type.router)
+app.include_router(shift.router)
+app.include_router(member.router)
 
 @app.get("/")
 async def root():
