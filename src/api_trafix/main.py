@@ -13,7 +13,7 @@ from api_trafix.config.settings import get_settings
 from api_trafix.core.middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
-from api_trafix.routes import member, vehicle_type, shift
+from api_trafix.routes import member, shift, vehicle_type, parking_rate, parking_rate_tier, users
 
 
 @asynccontextmanager
@@ -54,9 +54,17 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Membersihkan objek error agar aman di-serialize ke JSON
+    errors = []
+    for error in exc.errors():
+        err_copy = error.copy()
+        if "ctx" in err_copy:
+            err_copy["ctx"] = {k: str(v) for k, v in err_copy["ctx"].items()}
+        errors.append(err_copy)
+
     return JSONResponse(
         status_code=422,
-        content={"detail": "Request validation failed", "errors": exc.errors()},
+        content={"detail": "Request validation failed", "errors": errors},
     )
 
 
@@ -76,6 +84,9 @@ app.include_router(users_router)
 app.include_router(vehicle_type.router)
 app.include_router(shift.router)
 app.include_router(member.router)
+app.include_router(parking_rate.router)
+app.include_router(parking_rate_tier.router)
+app.include_router(users.router)
 
 @app.get("/")
 async def root():

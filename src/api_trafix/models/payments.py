@@ -58,5 +58,4 @@ class Payment(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    # Relationship internal (tabel 14-16)
-    park_transaction: Mapped["ParkTransaction"] = relationship()
+    park_transaction: Mapped["ParkTransaction"] = relationship(back_populates="payments")
