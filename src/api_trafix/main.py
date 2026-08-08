@@ -11,17 +11,15 @@ from api_trafix.config.database import init_db
 from api_trafix.config.redis import close_redis
 from api_trafix.config.settings import get_settings
 from api_trafix.core.middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
+from api_trafix.routes import member, shift, vehicle_type
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
-from api_trafix.routes import member, vehicle_type, shift
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     yield
     await close_redis()
-
 
 app = FastAPI(
     title=get_settings().app_name,
@@ -76,7 +74,6 @@ app.include_router(users_router)
 app.include_router(vehicle_type.router)
 app.include_router(shift.router)
 app.include_router(member.router)
-
 @app.get("/")
 async def root():
     return {
