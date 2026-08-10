@@ -35,3 +35,15 @@ class ParkingRateRead(ParkingRateBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+class ParkingRateStatusUpdate(BaseModel):
+    status: RateStatus
+
+
+class ParkingRatePage(BaseModel):
+    items: list[ParkingRateRead]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
