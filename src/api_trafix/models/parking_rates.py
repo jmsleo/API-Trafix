@@ -9,11 +9,6 @@ from sqlalchemy.orm import relationship
 from api_trafix.config.database import Base
 
 
-class RateType(str, enum.Enum):
-    FLAT = "flat"
-    PROGRESSIVE = "progressive"
-
-
 class RateStatus(str, enum.Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -25,10 +20,6 @@ class ParkingRate(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(100), nullable=False)
     vehicle_type_id = Column(UUID(as_uuid=True), ForeignKey("vehicle_types.id"), nullable=False)
-    rate_type = Column(
-        Enum(RateType, values_callable=lambda e: [v.value for v in e], name="rate_type"),
-        nullable=False,
-    )
     base_price = Column(Integer, nullable=False)
     max_daily_price = Column(Integer, nullable=True)
     status = Column(
@@ -47,9 +38,3 @@ class ParkingRate(Base):
     )
 
     vehicle_type = relationship("VehicleType")
-    tiers = relationship(
-        "ParkingRateTier",
-        back_populates="parking_rate",
-        cascade="all, delete-orphan",
-        order_by="ParkingRateTier.tier_order",
-    )
