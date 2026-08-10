@@ -68,7 +68,9 @@ from api_trafix.schemas.shift import ShiftBase, ShiftCreate, ShiftPage, ShiftRea
 from api_trafix.schemas.subscription_plan import (
     SubscriptionPlanBase,
     SubscriptionPlanCreate,
+    SubscriptionPlanPage,
     SubscriptionPlanRead,
+    SubscriptionPlanStatusUpdate,
     SubscriptionPlanUpdate,
 )
 from api_trafix.schemas.user import (
@@ -152,6 +154,8 @@ __all__ = [
     "SubscriptionPlanCreate",
     "SubscriptionPlanRead",
     "SubscriptionPlanUpdate",
+    "SubscriptionPlanStatusUpdate",
+    "SubscriptionPlanPage",
     "UserBase",
     "UserCreate",
     "UserRead",

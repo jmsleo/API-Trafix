@@ -32,3 +32,17 @@ class SubscriptionPlanRead(SubscriptionPlanBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+class SubscriptionPlanStatusUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    is_active: bool
+
+
+class SubscriptionPlanPage(BaseModel):
+    items: list[SubscriptionPlanRead]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

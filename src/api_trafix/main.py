@@ -14,7 +14,7 @@ from api_trafix.core.middleware import RequestBodyLimitMiddleware, SecurityHeade
 from api_trafix.routes import member, shift, vehicle_type
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
-from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session
+from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -89,6 +89,7 @@ app.include_router(finance_dashboard.router)
 app.include_router(finance_reports.router)
 app.include_router(operator_session.router)
 app.include_router(operator_shift_assignment.router)
+app.include_router(subscription_plan.router)
 
 @app.get("/")
 async def root():
