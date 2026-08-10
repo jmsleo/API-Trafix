@@ -43,12 +43,6 @@ from api_trafix.schemas.parking_rate import (
     ParkingRateRead,
     ParkingRateUpdate,
 )
-from api_trafix.schemas.parking_rate_tier import (
-    ParkingRateTierBase,
-    ParkingRateTierCreate,
-    ParkingRateTierRead,
-    ParkingRateTierUpdate,
-)
 from api_trafix.schemas.parking_slot import (
     ParkingSlotBase,
     ParkingSlotCreate,
@@ -117,10 +111,6 @@ __all__ = [
     "ParkingRateCreate",
     "ParkingRateRead",
     "ParkingRateUpdate",
-    "ParkingRateTierBase",
-    "ParkingRateTierCreate",
-    "ParkingRateTierRead",
-    "ParkingRateTierUpdate",
     "ParkingSlotBase",
     "ParkingSlotCreate",
     "ParkingSlotRead",

@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from api_trafix.schemas.common import Name, NonNegativeInt
 
-RateType = Literal["flat", "progressive"]
 RateStatus = Literal["active", "inactive"]
 
 
@@ -15,7 +14,6 @@ class ParkingRateBase(BaseModel):
 
     name: Name
     vehicle_type_id: UUID
-    rate_type: RateType
     base_price: NonNegativeInt
     max_daily_price: NonNegativeInt | None = None
     status: RateStatus = "active"
@@ -38,7 +36,6 @@ class ParkingRateUpdate(BaseModel):
 
     name: Name | None = None
     vehicle_type_id: UUID | None = None
-    rate_type: RateType | None = None
     base_price: NonNegativeInt | None = None
     max_daily_price: NonNegativeInt | None = None
     status: RateStatus | None = None
