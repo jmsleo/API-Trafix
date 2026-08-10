@@ -11,6 +11,7 @@ from api_trafix.config.database import Base
 
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
+    FINANCE = "finance"
     TEKNISI = "teknisi"
     OPERATOR = "operator"
 
