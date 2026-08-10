@@ -79,3 +79,15 @@ class UserRead(UserBase):
     last_login: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class PasswordReset(BaseModel):
+    password: StrongPassword
+
+
+class UserPage(BaseModel):
+    items: list[UserRead]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
