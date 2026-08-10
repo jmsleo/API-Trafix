@@ -21,14 +21,19 @@ class MemberBase(BaseModel):
     created_by: UUID | None = None
 
 
-class MemberCreate(MemberBase):
-    pass
+class MemberCreate(BaseModel):
+    model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
+
+    name: Name
+    email: Email | None = None
+    phone_number: PhoneNumber | None = None
+    status: MemberStatus
+    created_by: UUID | None = None
 
 
 class MemberUpdate(BaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
-    member_code: MemberCode | None = None
     name: Name | None = None
     email: Email | None = None
     phone_number: PhoneNumber | None = None
