@@ -37,9 +37,6 @@ async def get_member(member_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
 @router.post("/", response_model=MemberRead, status_code=status.HTTP_201_CREATED)
 async def create_member(payload: MemberCreate, db: AsyncSession = Depends(get_db)):
-    existing = await crud.get_by_member_code(db, payload.member_code)
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Member code already exists")
     return await crud.create(db, payload)
 
 
@@ -52,12 +49,6 @@ async def update_member(
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
-
-    if payload.member_code and payload.member_code != db_obj.member_code:
-        existing = await crud.get_by_member_code(db, payload.member_code)
-        if existing is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Member code already exists")
-
     return await crud.update(db, db_obj, payload)
 
 

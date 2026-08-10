@@ -1,4 +1,6 @@
+import random
 import uuid
+from datetime import datetime, timezone
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -6,6 +8,16 @@ from sqlalchemy.exc import IntegrityError
 from api_trafix.models.member_vehicles import MemberVehicle
 from api_trafix.models.members import Member, MemberStatus
 from api_trafix.schemas.member import MemberCreate, MemberUpdate
+
+MEMBER_CODE_PREFIX = "FP"
+
+
+async def generate_member_code(db: AsyncSession) -> str:
+    date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    while True:
+        code = f"{MEMBER_CODE_PREFIX}-{date_part}-{random.randint(0, 9999):04d}"
+        if await get_by_member_code(db, code) is None:
+            return code
 
 
 async def get_all(
@@ -63,15 +75,17 @@ async def get_by_member_code(db: AsyncSession, member_code: str) -> Member | Non
 
 
 async def create(db: AsyncSession, payload: MemberCreate) -> Member:
-    db_obj = Member(**payload.model_dump())
-    db.add(db_obj)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise
-    await db.refresh(db_obj)
-    return db_obj
+    for _ in range(5):
+        db_obj = Member(**payload.model_dump(), member_code=await generate_member_code(db))
+        db.add(db_obj)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            continue
+        await db.refresh(db_obj)
+        return db_obj
+    raise IntegrityError("Could not generate a unique member code", None, None)
 
 
 async def update(db: AsyncSession, db_obj: Member, payload: MemberUpdate) -> Member:
