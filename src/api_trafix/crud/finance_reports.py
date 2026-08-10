@@ -29,7 +29,7 @@ async def get_transaction_report(
     filters = []
 
     if search:
-        pattern = f"%{search}%"
+        pattern = f"%{search.strip()}%"
         filters.append(
             or_(
                 ParkTransaction.police_number.ilike(pattern),
@@ -100,14 +100,14 @@ async def get_pending_ticket_report(
     ]
  
     if search:
-        pattern = f"%{search}%"
+        pattern = f"%{search.strip()}%"
         filters.append(
             or_(
                 ParkTransaction.police_number.ilike(pattern),
                 ParkTransaction.ticket_number.ilike(pattern),
             )
         )
- 
+
     if entry_date:
         start_utc, end_utc = _date_to_utc_range(entry_date)
         filters.append(ParkTransaction.entry_time >= start_utc)
@@ -134,6 +134,7 @@ async def get_pending_ticket_report(
         .select_from(ParkTransaction)
         .outerjoin(Payment, Payment.park_transaction_id == ParkTransaction.id)
         .where(*filters)
+        .distinct()
         .order_by(ParkTransaction.entry_time.desc())
         .offset(offset)
         .limit(size)
