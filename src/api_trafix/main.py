@@ -11,14 +11,10 @@ from api_trafix.config.database import init_db
 from api_trafix.config.redis import close_redis
 from api_trafix.config.settings import get_settings
 from api_trafix.core.middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
-from api_trafix.routes import member, shift, vehicle_type
+from api_trafix.routes import member, parking_rate, parking_rate_tier, shift, vehicle_type
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
-<<<<<<< HEAD
-from api_trafix.routes import member, shift, vehicle_type, parking_rate, parking_rate_tier, users
 
-=======
->>>>>>> 2a43833ccc4b0b8e8a9ece7bb2cf90a1751fb91f
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -87,13 +83,9 @@ app.include_router(users_router)
 app.include_router(vehicle_type.router)
 app.include_router(shift.router)
 app.include_router(member.router)
-<<<<<<< HEAD
 app.include_router(parking_rate.router)
 app.include_router(parking_rate_tier.router)
-app.include_router(users.router)
 
-=======
->>>>>>> 2a43833ccc4b0b8e8a9ece7bb2cf90a1751fb91f
 @app.get("/")
 async def root():
     return {
