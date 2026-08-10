@@ -18,8 +18,8 @@ class Shift(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(50), nullable=False, unique=True)
-    start_time = Column(Time(timezone=True), nullable=False)
-    finish_time = Column(Time(timezone=True), nullable=False)
+    start_time = Column(Time, nullable=False)
+    finish_time = Column(Time, nullable=False)
     crosses_midnight = Column(Boolean, nullable=False, default=False)
     status = Column(
         Enum(ShiftStatus, values_callable=lambda e: [v.value for v in e], name="shift_status"),
