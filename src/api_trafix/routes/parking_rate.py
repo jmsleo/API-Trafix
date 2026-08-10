@@ -1,22 +1,37 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from api_trafix.config.database import get_db
 from api_trafix.crud import parking_rate as crud
+from api_trafix.models import RateStatus
 from api_trafix.schemas.parking_rate import (
     ParkingRateCreate,
+    ParkingRatePage,
     ParkingRateRead,
+    ParkingRateStatusUpdate,
     ParkingRateUpdate,
 )
 
 router = APIRouter(prefix="/parking-rates", tags=["Parking Rates"])
 
 
-@router.get("/", response_model=list[ParkingRateRead])
-async def list_parking_rates(db: AsyncSession = Depends(get_db)):
-    return await crud.get_all(db)
+@router.get("/", response_model=ParkingRatePage)
+async def list_parking_rates(
+    search: str | None = Query(default=None, max_length=100),
+    status_filter: RateStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    items, total = await crud.get_all(
+        db, search=search, status=status_filter, page=page, page_size=page_size
+    )
+    total_pages = (total + page_size - 1) // page_size
+    return ParkingRatePage(
+        items=items, total=total, page=page, page_size=page_size, total_pages=total_pages
+    )
 
 
 @router.get("/{parking_rate_id}", response_model=ParkingRateRead)
@@ -67,6 +82,18 @@ async def update_parking_rate(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid vehicle_type_id or constraint violation",
         )
+
+
+@router.patch("/{parking_rate_id}/status", response_model=ParkingRateRead)
+async def update_parking_rate_status(
+    parking_rate_id: uuid.UUID,
+    payload: ParkingRateStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    db_obj = await crud.get_by_id(db, parking_rate_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parking rate not found")
+    return await crud.update_status(db, db_obj, payload.status)
 
 
 @router.delete("/{parking_rate_id}", status_code=status.HTTP_204_NO_CONTENT)

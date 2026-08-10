@@ -6,7 +6,7 @@ from api_trafix.models.shifts import Shift, ShiftStatus
 from api_trafix.models.subscription_plans import SubscriptionPlan
 from api_trafix.models.users import User, UserRole, UserStatus
 from api_trafix.models.vehicle_types import VehicleStatus, VehicleType
-from api_trafix.models.parking_rates import ParkingRate
+from api_trafix.models.parking_rates import ParkingRate, RateStatus
 from api_trafix.models.parking_slots import ParkingSlot
 from api_trafix.models.devices import Device
 from api_trafix.models.member_vehicles import MemberVehicle
@@ -31,6 +31,7 @@ __all__ = [
     "VehicleStatus",
     "VehicleType",
     "ParkingRate",
+    "RateStatus",
     "ParkingSlot",
     "Device",
     "MemberVehicle",
