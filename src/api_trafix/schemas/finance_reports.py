@@ -34,3 +34,20 @@ class TransactionReportItem(BaseModel):
 class TransactionReportResponse(BaseModel):
     items: list[TransactionReportItem]
     pagination: PaginationMeta
+
+class PendingTicketItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+ 
+    id: uuid.UUID
+    ticket_number: str
+    police_number: str
+    vehicle_type_id: uuid.UUID
+    entry_time: datetime
+    entry_shift_id: uuid.UUID | None
+    status_parking: ParkingStatus
+    payment_status: str | None  # None jika belum ada record Payment sama sekali
+ 
+ 
+class PendingTicketResponse(BaseModel):
+    items: list[PendingTicketItem]
+    pagination: PaginationMeta
