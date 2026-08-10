@@ -15,17 +15,24 @@ Email = Annotated[EmailStr, StringConstraints(strip_whitespace=True)]
 def _normalize_phone(value: Any) -> Any:
     if value is None:
         return value
-    return re.sub(r"[\s()\-.]", "", str(value).strip())
+    digits = re.sub(r"[\s()\-.]", "", str(value).strip())
+    if digits.startswith("+62"):
+        return digits
+    if digits.startswith("62"):
+        return f"+{digits}"
+    if digits.startswith("0"):
+        return f"+62{digits[1:]}"
+    return digits
 
 
 PhoneNumber = Annotated[
     str,
     BeforeValidator(_normalize_phone),
     StringConstraints(
-        min_length=9,
+        min_length=11,
         max_length=16,
         strip_whitespace=True,
-        pattern=r"^(\+?62|0)[2-9][0-9]{7,12}$",
+        pattern=r"^\+62[2-9][0-9]{7,12}$",
     ),
 ]
 
