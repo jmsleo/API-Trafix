@@ -12,7 +12,7 @@ from api_trafix.schemas.auth import (
 )
 from api_trafix.schemas.device import DeviceBase, DeviceCreate, DeviceRead, DeviceUpdate
 from api_trafix.schemas.gate import GateBase, GateCreate, GateRead, GateUpdate
-from api_trafix.schemas.member import MemberBase, MemberCreate, MemberRead, MemberUpdate
+from api_trafix.schemas.member import MemberBase, MemberCreate, MemberPage, MemberRead, MemberUpdate
 from api_trafix.schemas.member_subscription import (
     MemberSubscriptionBase,
     MemberSubscriptionCreate,
@@ -93,6 +93,7 @@ __all__ = [
     "MemberCreate",
     "MemberRead",
     "MemberUpdate",
+    "MemberPage",
     "MemberSubscriptionBase",
     "MemberSubscriptionCreate",
     "MemberSubscriptionRead",
