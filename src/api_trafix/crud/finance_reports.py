@@ -56,14 +56,12 @@ async def get_transaction_report(
             )
         )
 
-    # --- Query 1: total baris (untuk metadata paginasi) ---
     count_stmt = select(func.count(ParkTransaction.id)).where(*filters)
     total_items = (await db.execute(count_stmt)).scalar_one()
 
     total_pages = (total_items + size - 1) // size if total_items > 0 else 0
     offset = (page - 1) * size
 
-    # --- Query 2: data sebenarnya (offset + limit) ---
     data_stmt = (
         select(ParkTransaction)
         .where(*filters)
@@ -116,7 +114,6 @@ async def get_pending_ticket_report(
     if shift_id:
         filters.append(ParkTransaction.entry_shift_id == shift_id)
  
-    # --- Query 1: total baris (untuk metadata paginasi) ---
     count_stmt = (
         select(func.count(func.distinct(ParkTransaction.id)))
         .select_from(ParkTransaction)
@@ -127,8 +124,7 @@ async def get_pending_ticket_report(
  
     total_pages = (total_items + size - 1) // size if total_items > 0 else 0
     offset = (page - 1) * size
- 
-    # --- Query 2: data sebenarnya (offset + limit) ---
+
     data_stmt = (
         select(ParkTransaction, Payment.status.label("payment_status"))
         .select_from(ParkTransaction)

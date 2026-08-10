@@ -5,9 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.models import ParkingStatus, ParkTransaction, Payment, PaymentStatus
 
-# ---------------------------------------------------------------------------
-# Timezone helper (WIB = UTC+7)
-# ---------------------------------------------------------------------------
 WIB = timezone(timedelta(hours=7))
 
 
@@ -31,9 +28,6 @@ def get_today_range_wib_to_utc() -> tuple[datetime, datetime, str]:
     return start_utc, end_utc, date_label
 
 
-# ---------------------------------------------------------------------------
-# 1. Revenue Today
-# ---------------------------------------------------------------------------
 async def get_revenue_today(db: AsyncSession) -> dict:
     start_utc, end_utc, date_label = get_today_range_wib_to_utc()
 
@@ -56,9 +50,6 @@ async def get_revenue_today(db: AsyncSession) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# 2. Revenue by Shift
-# ---------------------------------------------------------------------------
 async def get_revenue_by_shift(db: AsyncSession) -> dict:
     start_utc, end_utc, date_label = get_today_range_wib_to_utc()
 
@@ -92,9 +83,6 @@ async def get_revenue_by_shift(db: AsyncSession) -> dict:
     return {"date": date_label, "shifts": shifts}
 
 
-# ---------------------------------------------------------------------------
-# 3. Vehicle Distribution
-# ---------------------------------------------------------------------------
 async def get_vehicle_distribution(db: AsyncSession) -> dict:
     start_utc, end_utc, date_label = get_today_range_wib_to_utc()
 
@@ -133,9 +121,7 @@ async def get_vehicle_distribution(db: AsyncSession) -> dict:
         "distribution": distribution,
     }
 
-# ---------------------------------------------------------------------------
-# Helper: rentang KEMARIN dalam WIB -> UTC
-# ---------------------------------------------------------------------------
+
 def get_yesterday_range_wib_to_utc() -> tuple[datetime, datetime, str]:
     """
     Sama seperti get_today_range_wib_to_utc(), tapi untuk tanggal kemarin
@@ -154,9 +140,6 @@ def get_yesterday_range_wib_to_utc() -> tuple[datetime, datetime, str]:
     return start_utc, end_utc, date_label
  
  
-# ---------------------------------------------------------------------------
-# Helper: persentase pertumbuhan yang aman terhadap division by zero
-# ---------------------------------------------------------------------------
 def safe_growth_percentage(current: int, previous: int) -> float:
     if previous == 0:
         # Jika kemarin 0 dan hari ini juga 0 -> tidak ada pertumbuhan.
@@ -165,9 +148,6 @@ def safe_growth_percentage(current: int, previous: int) -> float:
     return round(((current - previous) / previous) * 100, 2)
  
  
-# ---------------------------------------------------------------------------
-# 4. Payment Distribution
-# ---------------------------------------------------------------------------
 async def get_payment_distribution(db: AsyncSession) -> dict:
     start_utc, end_utc, date_label = get_today_range_wib_to_utc()
  
@@ -216,9 +196,6 @@ async def get_payment_distribution(db: AsyncSession) -> dict:
     }
  
  
-# ---------------------------------------------------------------------------
-# 5. Executive Insight
-# ---------------------------------------------------------------------------
 async def get_executive_insight(db: AsyncSession) -> dict:
     start_today_utc, end_today_utc, date_label = get_today_range_wib_to_utc()
     start_yesterday_utc, end_yesterday_utc, _ = get_yesterday_range_wib_to_utc()
@@ -232,8 +209,7 @@ async def get_executive_insight(db: AsyncSession) -> dict:
         ParkTransaction.exit_time <= end_today_utc,
     )
     revenue_today = (await db.execute(stmt_revenue_today)).scalar_one()
- 
-    # --- Revenue kemarin ---
+
     stmt_revenue_yesterday = select(
         func.coalesce(func.sum(ParkTransaction.total_fee), 0)
     ).where(
@@ -245,7 +221,6 @@ async def get_executive_insight(db: AsyncSession) -> dict:
  
     revenue_growth_percentage = safe_growth_percentage(revenue_today, revenue_yesterday)
  
-    # --- Shift dengan pendapatan tertinggi hari ini ---
     stmt_highest_shift = (
         select(
             ParkTransaction.exit_shift_id,
@@ -262,9 +237,7 @@ async def get_executive_insight(db: AsyncSession) -> dict:
     )
     highest_shift_row = (await db.execute(stmt_highest_shift)).first()
     highest_revenue_shift_id = highest_shift_row.exit_shift_id if highest_shift_row else None
- 
-    # --- Total tiket pending hari ini ---
-    # PARKED (belum keluar) ATAU pembayarannya masih PENDING, berdasarkan entry_time hari ini
+
     stmt_pending = (
         select(func.count(func.distinct(ParkTransaction.id)))
         .outerjoin(Payment, Payment.park_transaction_id == ParkTransaction.id)

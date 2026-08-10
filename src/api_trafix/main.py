@@ -11,10 +11,19 @@ from api_trafix.config.database import init_db
 from api_trafix.config.redis import close_redis
 from api_trafix.config.settings import get_settings
 from api_trafix.core.middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
-from api_trafix.routes import member, shift, vehicle_type
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
-from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session
+from api_trafix.routes import (
+    member, 
+    shift, 
+    vehicle_type, 
+    parking_rate, 
+    users, 
+    finance_dashboard, 
+    finance_reports, 
+    operator_shift_assignment, 
+    operator_session
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -45,9 +45,10 @@ class PendingTicketItem(BaseModel):
     entry_time: datetime
     entry_shift_id: uuid.UUID | None
     status_parking: ParkingStatus
-    payment_status: str | None  # None jika belum ada record Payment sama sekali
+    payment_status: str | None  
  
  
 class PendingTicketResponse(BaseModel):
     items: list[PendingTicketItem]
     pagination: PaginationMeta
+    

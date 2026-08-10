@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.crud import finance_reports as crud_reports
-from api_trafix.config.database import get_db  # sesuaikan dengan lokasi dependency Anda
+from api_trafix.config.database import get_db  
 from api_trafix.models import ParkingStatus
 from api_trafix.schemas.finance_reports import (
     TransactionReportResponse,

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.crud import finance_dashboard as crud_finance
-from api_trafix.config.database import get_db  # sesuaikan dengan lokasi dependency Anda
+from api_trafix.config.database import get_db  
 from api_trafix.schemas.finance_dashboard import (
     RevenueByShiftResponse,
     RevenueTodayResponse,

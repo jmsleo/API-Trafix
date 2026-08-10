@@ -9,7 +9,7 @@ class RevenueTodayResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    date: str  # tanggal WIB, format YYYY-MM-DD
+    date: str  
     total_revenue: int
     total_transactions: int
 
@@ -32,7 +32,7 @@ class VehicleDistributionItem(BaseModel):
 
     vehicle_type_id: uuid.UUID
     total_vehicles: int
-    percentage: float  # dalam persen, dibulatkan 2 desimal
+    percentage: float  
 
 
 class VehicleDistributionResponse(BaseModel):
@@ -43,10 +43,10 @@ class VehicleDistributionResponse(BaseModel):
 class PaymentDistributionItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
  
-    payment_method: str  # Cash / QRIS / Emoney
+    payment_method: str 
     total_transactions: int
     total_amount: int
-    percentage: float  # persentase terhadap total_amount, dibulatkan 2 desimal
+    percentage: float  
  
  
 class PaymentDistributionResponse(BaseModel):
@@ -63,3 +63,4 @@ class ExecutiveInsightResponse(BaseModel):
     revenue_growth_percentage: float
     highest_revenue_shift_id: uuid.UUID | None
     total_pending_tickets: int
+    
