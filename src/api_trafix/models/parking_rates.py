@@ -21,14 +21,11 @@ class ParkingRate(Base):
     name = Column(String(100), nullable=False)
     vehicle_type_id = Column(UUID(as_uuid=True), ForeignKey("vehicle_types.id"), nullable=False)
     base_price = Column(Integer, nullable=False)
-    max_daily_price = Column(Integer, nullable=True)
     status = Column(
         Enum(RateStatus, values_callable=lambda e: [v.value for v in e], name="rate_status"),
         nullable=False,
         default=RateStatus.ACTIVE,
     )
-    effective_from = Column(DateTime(timezone=True), nullable=False)
-    effective_until = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
