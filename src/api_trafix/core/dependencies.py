@@ -111,3 +111,4 @@ def require_roles(*roles: UserRole) -> Callable:
 
 
 get_current_admin = require_roles(UserRole.ADMIN)
+get_current_finance = require_roles(UserRole.FINANCE)
