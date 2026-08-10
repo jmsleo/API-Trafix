@@ -31,6 +31,13 @@ from api_trafix.schemas.operator_session import (
     OperatorSessionRead,
     OperatorSessionUpdate,
 )
+from api_trafix.schemas.operator_shift_assignment import (
+    OperatorBrief,
+    OperatorShiftAssignmentCreate,
+    OperatorShiftAssignmentPage,
+    OperatorShiftAssignmentRead,
+    ShiftBrief,
+)
 from api_trafix.schemas.park_transaction import (
     ParkTransactionBase,
     ParkTransactionCreate,
@@ -113,6 +120,11 @@ __all__ = [
     "OperatorSessionCreate",
     "OperatorSessionRead",
     "OperatorSessionUpdate",
+    "OperatorBrief",
+    "OperatorShiftAssignmentCreate",
+    "OperatorShiftAssignmentRead",
+    "OperatorShiftAssignmentPage",
+    "ShiftBrief",
     "ParkTransactionBase",
     "ParkTransactionCreate",
     "ParkTransactionRead",
