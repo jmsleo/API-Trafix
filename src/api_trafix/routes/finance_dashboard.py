@@ -7,6 +7,8 @@ from api_trafix.schemas.finance_dashboard import (
     RevenueByShiftResponse,
     RevenueTodayResponse,
     VehicleDistributionResponse,
+    ExecutiveInsightResponse,
+    PaymentDistributionResponse
 )
 
 router = APIRouter(prefix="/finance/dashboard", tags=["Finance Dashboard"])
@@ -30,4 +32,18 @@ async def revenue_by_shift(db: AsyncSession = Depends(get_db)):
 async def vehicle_distribution(db: AsyncSession = Depends(get_db)):
     """Distribusi jumlah & persentase kendaraan berdasarkan vehicle_type_id, hari ini."""
     data = await crud_finance.get_vehicle_distribution(db)
+    return data
+
+
+@router.get("/payment-distribution", response_model=PaymentDistributionResponse)
+async def payment_distribution(db: AsyncSession = Depends(get_db)):
+    """Distribusi metode pembayaran hari ini (COMPLETED + SUCCESS)."""
+    data = await crud_finance.get_payment_distribution(db)
+    return data
+ 
+ 
+@router.get("/executive-insight", response_model=ExecutiveInsightResponse)
+async def executive_insight(db: AsyncSession = Depends(get_db)):
+    """Insight operasional hari ini vs kemarin."""
+    data = await crud_finance.get_executive_insight(db)
     return data

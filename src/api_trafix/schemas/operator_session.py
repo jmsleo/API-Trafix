@@ -1,29 +1,11 @@
-from datetime import datetime, time
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
 from api_trafix.models.gates import GateStatus, GateType
 from api_trafix.models.operator_sessions import OperatorSessionStatus
-from api_trafix.schemas.shift import ShiftTime
-
-
-class OperatorBrief(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    name: str
-    username: str
-
-
-class ShiftBrief(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    name: str
-    start_time: ShiftTime
-    finish_time: ShiftTime
-    crosses_midnight: bool
+from api_trafix.schemas.operator_shift_assignment import OperatorBrief, ShiftBrief
 
 
 class GateBrief(BaseModel):

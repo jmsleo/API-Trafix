@@ -12,6 +12,10 @@ from api_trafix.models.devices import Device
 from api_trafix.models.member_vehicles import MemberVehicle
 from api_trafix.models.member_subscriptions import MemberSubscription
 from api_trafix.models.operator_sessions import OperatorSession, OperatorSessionStatus
+from api_trafix.models.operator_shift_assignments import (
+    OperatorShiftAssignment,
+    OperatorShiftAssignmentStatus,
+)
 from api_trafix.models.payments import Payment, PaymentMethod, PaymentStatus
 from api_trafix.models.park_transactions import ParkTransaction, ParkingStatus, DetectionMethod
 
@@ -38,6 +42,8 @@ __all__ = [
     "MemberSubscription",
     "OperatorSession",
     "OperatorSessionStatus",
+    "OperatorShiftAssignment",
+    "OperatorShiftAssignmentStatus",
     "Payment",
     "PaymentMethod",
     "PaymentStatus",
