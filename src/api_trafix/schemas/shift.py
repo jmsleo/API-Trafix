@@ -1,8 +1,8 @@
 from datetime import datetime, time
-from typing import Literal
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, model_validator
 
 from api_trafix.models.shifts import ShiftStatus
 from api_trafix.schemas.common import ShortName
@@ -10,12 +10,29 @@ from api_trafix.schemas.common import ShortName
 CrossesMidnight = bool
 
 
+def _strip_tz(value: Any) -> Any:
+    if value is None:
+        return value
+    if isinstance(value, time):
+        return value.replace(tzinfo=None) if value.tzinfo is not None else value
+    if isinstance(value, str):
+        try:
+            parsed = time.fromisoformat(value)
+        except ValueError:
+            return value
+        return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+    return value
+
+
+ShiftTime = Annotated[time, BeforeValidator(_strip_tz)]
+
+
 class ShiftBase(BaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
     name: ShortName
-    start_time: time
-    finish_time: time
+    start_time: ShiftTime
+    finish_time: ShiftTime
     crosses_midnight: CrossesMidnight = False
     status: ShiftStatus
 
@@ -38,8 +55,8 @@ class ShiftUpdate(BaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
     name: ShortName | None = None
-    start_time: time | None = None
-    finish_time: time | None = None
+    start_time: ShiftTime | None = None
+    finish_time: ShiftTime | None = None
     crosses_midnight: CrossesMidnight | None = None
     status: ShiftStatus | None = None
 
