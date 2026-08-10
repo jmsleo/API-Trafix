@@ -60,3 +60,11 @@ class ShiftRead(ShiftBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+class ShiftPage(BaseModel):
+    items: list[ShiftRead]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

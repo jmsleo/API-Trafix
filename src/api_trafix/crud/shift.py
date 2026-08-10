@@ -1,15 +1,38 @@
 import uuid
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
-from api_trafix.models.shifts import Shift
+from api_trafix.models.shifts import Shift, ShiftStatus
 from api_trafix.schemas.shift import ShiftCreate, ShiftUpdate
 
 
-async def get_all(db: AsyncSession) -> list[Shift]:
-    result = await db.execute(select(Shift).order_by(Shift.name))
-    return list(result.scalars().all())
+async def get_all(
+    db: AsyncSession,
+    search: str | None = None,
+    status: ShiftStatus | None = None,
+    page: int = 1,
+    page_size: int = 10,
+) -> tuple[list[Shift], int]:
+    stmt = select(Shift)
+    count_stmt = select(func.count()).select_from(Shift)
+
+    if search:
+        like = f"%{search.strip()}%"
+        stmt = stmt.where(Shift.name.ilike(like))
+        count_stmt = count_stmt.where(Shift.name.ilike(like))
+    if status is not None:
+        stmt = stmt.where(Shift.status == status)
+        count_stmt = count_stmt.where(Shift.status == status)
+
+    total = (await db.execute(count_stmt)).scalar_one()
+    stmt = (
+        stmt.order_by(Shift.name)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all()), total
 
 
 async def get_by_id(db: AsyncSession, shift_id: uuid.UUID) -> Shift | None:
