@@ -26,10 +26,10 @@ from api_trafix.schemas.member_vehicle import (
     MemberVehicleUpdate,
 )
 from api_trafix.schemas.operator_session import (
-    OperatorSessionBase,
-    OperatorSessionCreate,
+    GateBrief,
+    OperatorSessionPage,
     OperatorSessionRead,
-    OperatorSessionUpdate,
+    OperatorSessionStart,
 )
 from api_trafix.schemas.operator_shift_assignment import (
     OperatorBrief,
@@ -116,10 +116,10 @@ __all__ = [
     "MemberVehicleCreate",
     "MemberVehicleRead",
     "MemberVehicleUpdate",
-    "OperatorSessionBase",
-    "OperatorSessionCreate",
+    "OperatorSessionStart",
     "OperatorSessionRead",
-    "OperatorSessionUpdate",
+    "OperatorSessionPage",
+    "GateBrief",
     "OperatorBrief",
     "OperatorShiftAssignmentCreate",
     "OperatorShiftAssignmentRead",
