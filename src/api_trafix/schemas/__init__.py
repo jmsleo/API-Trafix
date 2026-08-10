@@ -64,7 +64,14 @@ from api_trafix.schemas.subscription_plan import (
     SubscriptionPlanRead,
     SubscriptionPlanUpdate,
 )
-from api_trafix.schemas.user import UserBase, UserCreate, UserRead, UserUpdate
+from api_trafix.schemas.user import (
+    PasswordReset,
+    UserBase,
+    UserCreate,
+    UserPage,
+    UserRead,
+    UserUpdate,
+)
 from api_trafix.schemas.vehicle_type import (
     VehicleTypeBase,
     VehicleTypeCreate,
@@ -137,6 +144,8 @@ __all__ = [
     "UserCreate",
     "UserRead",
     "UserUpdate",
+    "PasswordReset",
+    "UserPage",
     "VehicleTypeBase",
     "VehicleTypeCreate",
     "VehicleTypeRead",
