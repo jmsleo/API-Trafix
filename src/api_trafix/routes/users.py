@@ -19,6 +19,7 @@ async def list_users(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
 ):
     items, total = await crud.get_all(
         db, search=search, role=role_filter, status=status_filter, page=page, page_size=page_size
@@ -30,7 +31,11 @@ async def list_users(
 
 
 @router.get("/{user_id}", response_model=UserRead)
-async def get_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
     db_obj = await crud.get_by_id(db, user_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -54,6 +59,7 @@ async def update_user(
     user_id: uuid.UUID,
     payload: UserUpdate,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, user_id)
     if db_obj is None:
@@ -86,7 +92,11 @@ async def reset_password(
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def delete_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
     db_obj = await crud.get_by_id(db, user_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")

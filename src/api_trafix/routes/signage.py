@@ -1,0 +1,399 @@
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api_trafix.config.database import get_db
+from api_trafix.core.dependencies import get_current_admin
+from api_trafix.crud import signage as crud
+from api_trafix.models import SignageContentType, User
+from api_trafix.schemas.signage import (
+    SignageAssignmentCreate,
+    SignageAssignmentPage,
+    SignageAssignmentRead,
+    SignageAssignmentStatusUpdate,
+    SignageContentCreate,
+    SignageContentPage,
+    SignageContentRead,
+    SignageContentStatusUpdate,
+    SignageContentUpdate,
+    SignageCreate,
+    SignagePage,
+    SignageRead,
+    SignageScheduleCreate,
+    SignageSchedulePage,
+    SignageScheduleRead,
+    SignageScheduleStatusUpdate,
+    SignageScheduleUpdate,
+    SignageStatus,
+    SignageStatusUpdate,
+    SignageUpdate,
+)
+
+router = APIRouter(prefix="/signages", tags=["Signage"])
+
+
+def _page(total: int, page: int, page_size: int) -> int:
+    return (total + page_size - 1) // page_size
+
+
+# ---------------------------------------------------------------------------
+# Signage Management
+# ---------------------------------------------------------------------------
+@router.get("/", response_model=SignagePage)
+async def list_signages(
+    search: str | None = Query(default=None, max_length=100),
+    status_filter: SignageStatus | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    items, total = await crud.get_all_signages(
+        db, search=search, status=status_filter, page=page, page_size=page_size
+    )
+    return SignagePage(
+        items=items, total=total, page=page, page_size=page_size, total_pages=_page(total, page, page_size)
+    )
+
+
+@router.post("/", response_model=SignageRead, status_code=status.HTTP_201_CREATED)
+async def create_signage(
+    payload: SignageCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    existing = await crud.get_signage_by_code(db, payload.code)
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code already exists")
+    return await crud.create_signage(db, payload)
+
+
+# ---------------------------------------------------------------------------
+# Content Management
+# ---------------------------------------------------------------------------
+@router.get("/contents", response_model=SignageContentPage)
+async def list_contents(
+    search: str | None = Query(default=None, max_length=100),
+    content_type: str | None = Query(default=None),
+    is_active: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    type_filter = None
+    if content_type is not None:
+        try:
+            type_filter = SignageContentType(content_type)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid content_type, must be one of {[t.value for t in SignageContentType]}",
+            )
+    items, total = await crud.get_all_contents(
+        db, search=search, content_type=type_filter, is_active=is_active, page=page, page_size=page_size
+    )
+    return SignageContentPage(
+        items=items, total=total, page=page, page_size=page_size, total_pages=_page(total, page, page_size)
+    )
+
+
+@router.get("/contents/{content_id}", response_model=SignageContentRead)
+async def get_content(content_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    db_obj = await crud.get_content(db, content_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+    return db_obj
+
+
+@router.post("/contents", response_model=SignageContentRead, status_code=status.HTTP_201_CREATED)
+async def create_content(
+    payload: SignageContentCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    return await crud.create_content(db, payload)
+
+
+@router.put("/contents/{content_id}", response_model=SignageContentRead)
+async def update_content(
+    content_id: uuid.UUID,
+    payload: SignageContentUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_content(db, content_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+    return await crud.update_content(db, db_obj, payload)
+
+
+@router.patch("/contents/{content_id}/status", response_model=SignageContentRead)
+async def update_content_status(
+    content_id: uuid.UUID,
+    payload: SignageContentStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_content(db, content_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+    return await crud.update_content(db, db_obj, payload)
+
+
+@router.delete("/contents/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_content(
+    content_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_content(db, content_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+    if await crud.is_content_in_use(db, content_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Content is in use by assignments or schedules",
+        )
+    await crud.delete_content(db, db_obj)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Content Assignment
+# ---------------------------------------------------------------------------
+@router.get("/assignments", response_model=SignageAssignmentPage)
+async def list_assignments(
+    signage_id: uuid.UUID | None = Query(default=None),
+    content_id: uuid.UUID | None = Query(default=None),
+    is_active: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    items, total = await crud.get_all_assignments(
+        db,
+        signage_id=signage_id,
+        content_id=content_id,
+        is_active=is_active,
+        page=page,
+        page_size=page_size,
+    )
+    return SignageAssignmentPage(
+        items=items, total=total, page=page, page_size=page_size, total_pages=_page(total, page, page_size)
+    )
+
+
+@router.get("/assignments/{assignment_id}", response_model=SignageAssignmentRead)
+async def get_assignment(assignment_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    db_obj = await crud.get_assignment(db, assignment_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    return db_obj
+
+
+@router.post("/assignments", response_model=SignageAssignmentRead, status_code=status.HTTP_201_CREATED)
+async def create_assignment(
+    payload: SignageAssignmentCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    signage = await crud.get_signage(db, payload.signage_id)
+    if signage is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+    content = await crud.get_content(db, payload.content_id)
+    if content is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+    existing = await crud.get_assignment_by_pair(db, payload.signage_id, payload.content_id)
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This content is already assigned to the signage",
+        )
+    try:
+        return await crud.create_assignment(db, payload)
+    except IntegrityError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This content is already assigned to the signage",
+        )
+
+
+@router.patch("/assignments/{assignment_id}/status", response_model=SignageAssignmentRead)
+async def update_assignment_status(
+    assignment_id: uuid.UUID,
+    payload: SignageAssignmentStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_assignment(db, assignment_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    return await crud.update_assignment(db, db_obj, payload)
+
+
+@router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_assignment(
+    assignment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_assignment(db, assignment_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    await crud.delete_assignment(db, db_obj)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Content Scheduling
+# ---------------------------------------------------------------------------
+@router.get("/schedules", response_model=SignageSchedulePage)
+async def list_schedules(
+    signage_id: uuid.UUID | None = Query(default=None),
+    content_id: uuid.UUID | None = Query(default=None),
+    is_active: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    items, total = await crud.get_all_schedules(
+        db,
+        signage_id=signage_id,
+        content_id=content_id,
+        is_active=is_active,
+        page=page,
+        page_size=page_size,
+    )
+    return SignageSchedulePage(
+        items=items, total=total, page=page, page_size=page_size, total_pages=_page(total, page, page_size)
+    )
+
+
+@router.get("/schedules/{schedule_id}", response_model=SignageScheduleRead)
+async def get_schedule(schedule_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    db_obj = await crud.get_schedule(db, schedule_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+    return db_obj
+
+
+@router.post("/schedules", response_model=SignageScheduleRead, status_code=status.HTTP_201_CREATED)
+async def create_schedule(
+    payload: SignageScheduleCreate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    signage = await crud.get_signage(db, payload.signage_id)
+    if signage is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+    content = await crud.get_content(db, payload.content_id)
+    if content is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+    return await crud.create_schedule(db, payload)
+
+
+@router.put("/schedules/{schedule_id}", response_model=SignageScheduleRead)
+async def update_schedule(
+    schedule_id: uuid.UUID,
+    payload: SignageScheduleUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_schedule(db, schedule_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+    if payload.signage_id is not None:
+        signage = await crud.get_signage(db, payload.signage_id)
+        if signage is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+    if payload.content_id is not None:
+        content = await crud.get_content(db, payload.content_id)
+        if content is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+    return await crud.update_schedule(db, db_obj, payload)
+
+
+@router.patch("/schedules/{schedule_id}/status", response_model=SignageScheduleRead)
+async def update_schedule_status(
+    schedule_id: uuid.UUID,
+    payload: SignageScheduleStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_schedule(db, schedule_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+    return await crud.update_schedule(db, db_obj, payload)
+
+
+@router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_schedule(
+    schedule_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_schedule(db, schedule_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+    await crud.delete_schedule(db, db_obj)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Signage by ID (registered last to avoid shadowing sub-resources)
+# ---------------------------------------------------------------------------
+@router.get("/{signage_id}", response_model=SignageRead)
+async def get_signage(signage_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    db_obj = await crud.get_signage(db, signage_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+    return db_obj
+
+
+@router.put("/{signage_id}", response_model=SignageRead)
+async def update_signage(
+    signage_id: uuid.UUID,
+    payload: SignageUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_signage(db, signage_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+    if payload.code and payload.code != db_obj.code:
+        existing = await crud.get_signage_by_code(db, payload.code)
+        if existing is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code already exists")
+    return await crud.update_signage(db, db_obj, payload)
+
+
+@router.patch("/{signage_id}/status", response_model=SignageRead)
+async def update_signage_status(
+    signage_id: uuid.UUID,
+    payload: SignageStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_signage(db, signage_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+    return await crud.update_signage(db, db_obj, payload)
+
+
+@router.delete("/{signage_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_signage(
+    signage_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_signage(db, signage_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+    if await crud.is_signage_in_use(db, signage_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Signage is in use by assignments or schedules",
+        )
+    await crud.delete_signage(db, db_obj)
+    return None

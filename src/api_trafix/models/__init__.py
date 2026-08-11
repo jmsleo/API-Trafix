@@ -19,6 +19,14 @@ from api_trafix.models.park_transactions import (
 from api_trafix.models.parking_rates import ParkingRate, RateStatus
 from api_trafix.models.parking_slots import ParkingSlot
 from api_trafix.models.payments import Payment, PaymentMethod, PaymentStatus
+from api_trafix.models.signage import (
+    Signage,
+    SignageAssignment,
+    SignageContent,
+    SignageContentType,
+    SignageSchedule,
+    SignageStatus,
+)
 from api_trafix.models.shifts import Shift, ShiftStatus
 from api_trafix.models.subscription_plans import SubscriptionPlan
 from api_trafix.models.users import User, UserRole, UserStatus
@@ -56,5 +64,11 @@ __all__ = [
     "UserRole",
     "UserStatus",
     "VehicleStatus",
-    "VehicleType"
+    "VehicleType",
+    "Signage",
+    "SignageStatus",
+    "SignageContent",
+    "SignageContentType",
+    "SignageAssignment",
+    "SignageSchedule",
 ]
