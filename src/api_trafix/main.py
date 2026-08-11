@@ -16,7 +16,7 @@ from api_trafix.core.scheduler import run_periodic_tasks
 from api_trafix.routes import member, shift, vehicle_type
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
-from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_vehicle, member_subscription
+from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_vehicle, member_subscription, signage
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -98,6 +98,7 @@ app.include_router(operator_shift_assignment.router)
 app.include_router(subscription_plan.router)
 app.include_router(member_vehicle.router)
 app.include_router(member_subscription.router)
+app.include_router(signage.router)
 
 @app.get("/")
 async def root():
