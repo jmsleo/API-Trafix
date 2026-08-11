@@ -1,8 +1,10 @@
 from api_trafix.schemas.audit_log import (
     AuditLogBase,
     AuditLogCreate,
+    AuditLogPage,
     AuditLogRead,
     AuditLogUpdate,
+    UserBrief,
 )
 from api_trafix.schemas.auth import (
     LoginRequest,
@@ -93,8 +95,10 @@ from api_trafix.schemas.vehicle_type import (
 __all__ = [
     "AuditLogBase",
     "AuditLogCreate",
+    "AuditLogPage",
     "AuditLogRead",
     "AuditLogUpdate",
+    "UserBrief",
     "LoginRequest",
     "LogoutRequest",
     "RefreshRequest",
