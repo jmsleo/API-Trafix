@@ -104,3 +104,11 @@ class ParkTransaction(Base):
 
     # Relationship internal (tabel 14-16)
     payments: Mapped[list["Payment"]] = relationship(back_populates="park_transaction")
+    vehicle_type = relationship("VehicleType", foreign_keys=[vehicle_type_id])
+    member_vehicle = relationship("MemberVehicle", foreign_keys=[member_vehicle_id])
+    entry_gate = relationship("Gate", foreign_keys=[entry_gate_id])
+    exit_gate = relationship("Gate", foreign_keys=[exit_gate_id])
+    entry_shift = relationship("Shift", foreign_keys=[entry_shift_id])
+    exit_shift = relationship("Shift", foreign_keys=[exit_shift_id])
+    entry_operator = relationship("User", foreign_keys=[entry_operator_id])
+    exit_operator = relationship("User", foreign_keys=[exit_operator_id])
