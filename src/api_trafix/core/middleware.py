@@ -13,6 +13,8 @@ _HEADER_NAMES = frozenset(
     }
 )
 
+_UPLOAD_EXEMPT_PREFIXES = frozenset({"/backups/upload"})
+
 
 def _set_header(headers: list[tuple[bytes, bytes]], name: str, value: str) -> list[tuple[bytes, bytes]]:
     return [(k, v) for k, v in headers if k.lower() != name] + [(name.encode(), value.encode())]
@@ -58,6 +60,11 @@ class RequestBodyLimitMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
+
+        path = scope.get("path", "")
+        if any(path.startswith(prefix) for prefix in _UPLOAD_EXEMPT_PREFIXES):
+            await self.app(scope, receive, send)
+            return
 
         limit = get_settings().max_request_size_mb * 1024 * 1024
 

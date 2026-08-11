@@ -3,4 +3,5 @@
 __pycache__/
 *.pyc
 graphify-out/
+backups/
 .opencode

@@ -35,6 +35,10 @@ class Settings(BaseSettings):
 
     max_request_size_mb: int = 1
 
+    backup_dir: str = Field(default="backups", validation_alias="BACKUP_DIR")
+    backup_restore_timeout_seconds: int = 300
+    backup_upload_max_mb: int = 2048
+
     allowed_origins: list[str] = Field(
         default=["http://localhost:5173", "http://localhost:3000"],
         validation_alias="ALLOWED_ORIGINS",
