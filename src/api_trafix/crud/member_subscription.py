@@ -1,30 +1,17 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api_trafix.models.member_subscriptions import MemberSubscription
+from api_trafix.models.member_subscriptions import (
+    MemberSubscription,
+    STATUS_ACTIVE,
+    STATUS_CANCELLED,
+)
 from api_trafix.models.subscription_plans import SubscriptionPlan
 from api_trafix.schemas.member_subscription import MemberSubscriptionCreate
-
-ACTIVE = "active"
-EXPIRED = "expired"
-CANCELLED = "cancelled"
-
-
-async def auto_expire(db: AsyncSession) -> None:
-    now = datetime.now(timezone.utc)
-    await db.execute(
-        update(MemberSubscription)
-        .where(
-            MemberSubscription.status == ACTIVE,
-            MemberSubscription.end_date < now,
-        )
-        .values(status=EXPIRED)
-    )
-    await db.commit()
 
 
 async def get_all(
@@ -81,7 +68,7 @@ async def get_active_for_member(
     result = await db.execute(
         select(MemberSubscription).where(
             MemberSubscription.member_id == member_id,
-            MemberSubscription.status == ACTIVE,
+            MemberSubscription.status == STATUS_ACTIVE,
         )
     )
     return result.scalar_one_or_none()
@@ -102,7 +89,7 @@ async def create(
         plan_id=payload.plan_id,
         start_date=start_date,
         end_date=end_date,
-        status=ACTIVE,
+        status=STATUS_ACTIVE,
     )
     db.add(db_obj)
     await db.commit()
@@ -110,7 +97,7 @@ async def create(
 
 
 async def cancel(db: AsyncSession, db_obj: MemberSubscription) -> MemberSubscription:
-    db_obj.status = CANCELLED
+    db_obj.status = STATUS_CANCELLED
     await db.commit()
     return await get_by_id(db, db_obj.id)
 

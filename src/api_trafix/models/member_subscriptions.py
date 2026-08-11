@@ -9,6 +9,10 @@ from api_trafix.config.database import Base
 from api_trafix.models.members import Member
 from api_trafix.models.subscription_plans import SubscriptionPlan  # asumsikan Base = declarative_base() di base.py
 
+STATUS_ACTIVE = "active"
+STATUS_EXPIRED = "expired"
+STATUS_CANCELLED = "cancelled"
+
 
 class MemberSubscription(Base):
     __tablename__ = "member_subscriptions"
