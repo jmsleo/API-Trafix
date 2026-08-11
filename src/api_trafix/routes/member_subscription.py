@@ -8,6 +8,7 @@ from api_trafix.crud import member as member_crud
 from api_trafix.crud import member_subscription as crud
 from api_trafix.crud import subscription_plan as plan_crud
 from api_trafix.models import User, MemberStatus
+from api_trafix.services import subscriptions as subscription_service
 from api_trafix.schemas.member_subscription import (
     MemberSubscriptionCreate,
     MemberSubscriptionPage,
@@ -26,7 +27,7 @@ async def list_member_subscriptions(
     page_size: int = Query(default=10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    await crud.auto_expire(db)
+    await subscription_service.auto_expire(db)
     items, total = await crud.get_all(
         db,
         member_id=member_id,
@@ -45,7 +46,7 @@ async def list_member_subscriptions(
 async def get_member_subscription(
     subscription_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 ):
-    await crud.auto_expire(db)
+    await subscription_service.auto_expire(db)
     db_obj = await crud.get_by_id(db, subscription_id)
     if db_obj is None:
         raise HTTPException(
@@ -79,7 +80,7 @@ async def subscribe_member(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Subscription plan is not active"
         )
 
-    await crud.auto_expire(db)
+    await subscription_service.auto_expire(db)
     existing = await crud.get_active_for_member(db, payload.member_id)
     if existing is not None:
         raise HTTPException(
