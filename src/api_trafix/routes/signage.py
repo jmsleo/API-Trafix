@@ -8,6 +8,8 @@ from api_trafix.config.database import get_db
 from api_trafix.core.dependencies import get_current_admin
 from api_trafix.crud import signage as crud
 from api_trafix.models import SignageContentType, User
+from api_trafix.services.audit import log_action
+
 from api_trafix.schemas.signage import (
     SignageAssignmentCreate,
     SignageAssignmentPage,
@@ -61,12 +63,15 @@ async def list_signages(
 async def create_signage(
     payload: SignageCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     existing = await crud.get_signage_by_code(db, payload.code)
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code already exists")
-    return await crud.create_signage(db, payload)
+    db_obj = await crud.create_signage(db, payload)
+    await log_action(db, module="signage", action="create", user_id=current_user.id,
+                     role=current_user.role.value, description=f"Created signage '{db_obj.name}' ({db_obj.code})")
+    return db_obj
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +115,12 @@ async def get_content(content_id: uuid.UUID, db: AsyncSession = Depends(get_db))
 async def create_content(
     payload: SignageContentCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
-    return await crud.create_content(db, payload)
+    db_obj = await crud.create_content(db, payload)
+    await log_action(db, module="signage", action="create-content", user_id=current_user.id,
+                     role=current_user.role.value, description=f"Created signage content '{db_obj.title}'")
+    return db_obj
 
 
 @router.put("/contents/{content_id}", response_model=SignageContentRead)
@@ -120,12 +128,15 @@ async def update_content(
     content_id: uuid.UUID,
     payload: SignageContentUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
-    return await crud.update_content(db, db_obj, payload)
+    db_obj = await crud.update_content(db, db_obj, payload)
+    await log_action(db, module="signage", action="update-content", user_id=current_user.id,
+                     role=current_user.role.value, description=f"Updated signage content '{db_obj.title}'")
+    return db_obj
 
 
 @router.patch("/contents/{content_id}/status", response_model=SignageContentRead)
@@ -133,19 +144,23 @@ async def update_content_status(
     content_id: uuid.UUID,
     payload: SignageContentStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
-    return await crud.update_content(db, db_obj, payload)
+    db_obj = await crud.update_content(db, db_obj, payload)
+    await log_action(db, module="signage", action="update-content-status", user_id=current_user.id,
+                     role=current_user.role.value,
+                     description=f"Changed signage content '{db_obj.title}' active status to {db_obj.is_active}")
+    return db_obj
 
 
 @router.delete("/contents/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_content(
     content_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
@@ -155,6 +170,8 @@ async def delete_content(
             status_code=status.HTTP_409_CONFLICT,
             detail="Content is in use by assignments or schedules",
         )
+    await log_action(db, module="signage", action="delete-content", user_id=current_user.id,
+                     role=current_user.role.value, description=f"Deleted signage content '{db_obj.title}'")
     await crud.delete_content(db, db_obj)
     return None
 
@@ -196,7 +213,7 @@ async def get_assignment(assignment_id: uuid.UUID, db: AsyncSession = Depends(ge
 async def create_assignment(
     payload: SignageAssignmentCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     signage = await crud.get_signage(db, payload.signage_id)
     if signage is None:
@@ -211,12 +228,16 @@ async def create_assignment(
             detail="This content is already assigned to the signage",
         )
     try:
-        return await crud.create_assignment(db, payload)
+        db_obj = await crud.create_assignment(db, payload)
     except IntegrityError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This content is already assigned to the signage",
         )
+    await log_action(db, module="signage", action="create-assignment", user_id=current_user.id,
+                     role=current_user.role.value,
+                     description=f"Assigned content '{content.title}' to signage '{signage.name}'")
+    return db_obj
 
 
 @router.patch("/assignments/{assignment_id}/status", response_model=SignageAssignmentRead)
@@ -224,23 +245,30 @@ async def update_assignment_status(
     assignment_id: uuid.UUID,
     payload: SignageAssignmentStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_assignment(db, assignment_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
-    return await crud.update_assignment(db, db_obj, payload)
+    db_obj = await crud.update_assignment(db, db_obj, payload)
+    await log_action(db, module="signage", action="update-assignment-status", user_id=current_user.id,
+                     role=current_user.role.value,
+                     description=f"Changed signage assignment active status to {db_obj.is_active}")
+    return db_obj
 
 
 @router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_assignment(
     assignment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_assignment(db, assignment_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    await log_action(db, module="signage", action="delete-assignment", user_id=current_user.id,
+                     role=current_user.role.value,
+                     description=f"Deleted signage assignment (signage '{db_obj.signage.name}', content '{db_obj.content.title}')")
     await crud.delete_assignment(db, db_obj)
     return None
 
@@ -282,7 +310,7 @@ async def get_schedule(schedule_id: uuid.UUID, db: AsyncSession = Depends(get_db
 async def create_schedule(
     payload: SignageScheduleCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     signage = await crud.get_signage(db, payload.signage_id)
     if signage is None:
@@ -290,7 +318,11 @@ async def create_schedule(
     content = await crud.get_content(db, payload.content_id)
     if content is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
-    return await crud.create_schedule(db, payload)
+    db_obj = await crud.create_schedule(db, payload)
+    await log_action(db, module="signage", action="create-schedule", user_id=current_user.id,
+                     role=current_user.role.value,
+                     description=f"Scheduled content '{content.title}' on signage '{signage.name}'")
+    return db_obj
 
 
 @router.put("/schedules/{schedule_id}", response_model=SignageScheduleRead)
@@ -298,7 +330,7 @@ async def update_schedule(
     schedule_id: uuid.UUID,
     payload: SignageScheduleUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
@@ -311,7 +343,10 @@ async def update_schedule(
         content = await crud.get_content(db, payload.content_id)
         if content is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
-    return await crud.update_schedule(db, db_obj, payload)
+    db_obj = await crud.update_schedule(db, db_obj, payload)
+    await log_action(db, module="signage", action="update-schedule", user_id=current_user.id,
+                     role=current_user.role.value, description=f"Updated signage schedule for content '{db_obj.content.title}'")
+    return db_obj
 
 
 @router.patch("/schedules/{schedule_id}/status", response_model=SignageScheduleRead)
@@ -319,23 +354,30 @@ async def update_schedule_status(
     schedule_id: uuid.UUID,
     payload: SignageScheduleStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
-    return await crud.update_schedule(db, db_obj, payload)
+    db_obj = await crud.update_schedule(db, db_obj, payload)
+    await log_action(db, module="signage", action="update-schedule-status", user_id=current_user.id,
+                     role=current_user.role.value,
+                     description=f"Changed signage schedule active status to {db_obj.is_active}")
+    return db_obj
 
 
 @router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_schedule(
     schedule_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+    await log_action(db, module="signage", action="delete-schedule", user_id=current_user.id,
+                     role=current_user.role.value,
+                     description=f"Deleted signage schedule for content '{db_obj.content.title}'")
     await crud.delete_schedule(db, db_obj)
     return None
 
@@ -356,7 +398,7 @@ async def update_signage(
     signage_id: uuid.UUID,
     payload: SignageUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
@@ -365,7 +407,10 @@ async def update_signage(
         existing = await crud.get_signage_by_code(db, payload.code)
         if existing is not None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code already exists")
-    return await crud.update_signage(db, db_obj, payload)
+    db_obj = await crud.update_signage(db, db_obj, payload)
+    await log_action(db, module="signage", action="update", user_id=current_user.id,
+                     role=current_user.role.value, description=f"Updated signage '{db_obj.name}' ({db_obj.code})")
+    return db_obj
 
 
 @router.patch("/{signage_id}/status", response_model=SignageRead)
@@ -373,19 +418,22 @@ async def update_signage_status(
     signage_id: uuid.UUID,
     payload: SignageStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
-    return await crud.update_signage(db, db_obj, payload)
+    db_obj = await crud.update_signage(db, db_obj, payload)
+    await log_action(db, module="signage", action="update-status", user_id=current_user.id,
+                     role=current_user.role.value, description=f"Changed signage '{db_obj.name}' status to {db_obj.status.value}")
+    return db_obj
 
 
 @router.delete("/{signage_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_signage(
     signage_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
@@ -395,5 +443,7 @@ async def delete_signage(
             status_code=status.HTTP_409_CONFLICT,
             detail="Signage is in use by assignments or schedules",
         )
+    await log_action(db, module="signage", action="delete", user_id=current_user.id,
+                     role=current_user.role.value, description=f"Deleted signage '{db_obj.name}' ({db_obj.code})")
     await crud.delete_signage(db, db_obj)
     return None
