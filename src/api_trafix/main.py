@@ -7,16 +7,32 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api_trafix import models
 from api_trafix.config.database import init_db
 from api_trafix.config.redis import close_redis
 from api_trafix.config.settings import get_settings
-from api_trafix.core.middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
+from api_trafix.core.middleware import (
+    RequestBodyLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from api_trafix.core.scheduler import run_periodic_tasks
-from api_trafix.routes import member, shift, vehicle_type
+from api_trafix.routes import (
+    backup,
+    finance_dashboard,
+    finance_reports,
+    member,
+    member_subscription,
+    member_vehicle,
+    operator_session,
+    operator_shift_assignment,
+    parking_rate,
+    shift,
+    subscription_plan,
+    users,
+    vehicle_type,
+)
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
-from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_vehicle, member_subscription, audit_log
+from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_vehicle, member_subscription, signage, backup, audit_log
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -98,6 +114,8 @@ app.include_router(operator_shift_assignment.router)
 app.include_router(subscription_plan.router)
 app.include_router(member_vehicle.router)
 app.include_router(member_subscription.router)
+app.include_router(signage.router)
+app.include_router(backup.router)
 app.include_router(audit_log.router)
 
 @app.get("/")
