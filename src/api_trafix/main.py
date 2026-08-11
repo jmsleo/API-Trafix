@@ -31,7 +31,6 @@ from api_trafix.routes import (
     vehicle_type,
 )
 from api_trafix.routes.auth import router as auth_router
-from api_trafix.routes.users import router as users_router
 from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_vehicle, member_subscription, signage, backup, audit_log
 
 @asynccontextmanager
@@ -101,12 +100,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(auth_router)
-app.include_router(users_router)
+app.include_router(users.router)
 app.include_router(vehicle_type.router)
 app.include_router(shift.router)
 app.include_router(member.router)
 app.include_router(parking_rate.router)
-app.include_router(users.router)
 app.include_router(finance_dashboard.router)
 app.include_router(finance_reports.router)
 app.include_router(operator_session.router)
