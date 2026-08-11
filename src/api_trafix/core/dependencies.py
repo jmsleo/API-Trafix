@@ -113,3 +113,24 @@ def require_roles(*roles: UserRole) -> Callable:
 get_current_admin = require_roles(UserRole.ADMIN)
 get_current_finance = require_roles(UserRole.FINANCE)
 get_current_operator = require_roles(UserRole.OPERATOR)
+
+
+async def get_optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    if credentials is None:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+    if payload.get("type") != ACCESS_TOKEN_TYPE:
+        return None
+    if await _token_is_blacklisted(payload):
+        return None
+    try:
+        user_id = uuid.UUID(str(payload.get("sub")))
+    except (TypeError, ValueError):
+        return None
+    return await db.get(User, user_id)

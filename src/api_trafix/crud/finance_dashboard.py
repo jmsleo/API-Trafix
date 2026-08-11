@@ -11,6 +11,19 @@ from api_trafix.models import ParkingStatus, ParkTransaction, Payment, PaymentSt
 WIB = timezone(timedelta(hours=7))
 
 
+def _refunded_amounts_subquery():
+    """Refunded amount per transaction, untuk menghitung revenue netto."""
+    return (
+        select(
+            Payment.park_transaction_id.label("transaction_id"),
+            func.sum(Payment.amount).label("refunded_amount"),
+        )
+        .where(Payment.status == PaymentStatus.REFUNDED)
+        .group_by(Payment.park_transaction_id)
+        .subquery()
+    )
+
+
 def get_today_range_wib_to_utc() -> tuple[datetime, datetime, str]:
     """
     Menentukan batas awal (00:00:00) dan akhir (23:59:59.999999) hari ini
@@ -36,14 +49,22 @@ def get_today_range_wib_to_utc() -> tuple[datetime, datetime, str]:
 # ---------------------------------------------------------------------------
 async def get_revenue_today(db: AsyncSession) -> dict:
     start_utc, end_utc, date_label = get_today_range_wib_to_utc()
+    refunded = _refunded_amounts_subquery()
 
-    stmt = select(
-        func.coalesce(func.sum(ParkTransaction.total_fee), 0).label("total_revenue"),
-        func.count(ParkTransaction.id).label("total_transactions"),
-    ).where(
-        ParkTransaction.status_parking == ParkingStatus.COMPLETED,
-        ParkTransaction.exit_time >= start_utc,
-        ParkTransaction.exit_time <= end_utc,
+    stmt = (
+        select(
+            func.coalesce(
+                func.sum(ParkTransaction.total_fee - func.coalesce(refunded.c.refunded_amount, 0)),
+                0,
+            ).label("total_revenue"),
+            func.count(ParkTransaction.id).label("total_transactions"),
+        )
+        .outerjoin(refunded, refunded.c.transaction_id == ParkTransaction.id)
+        .where(
+            ParkTransaction.status_parking == ParkingStatus.COMPLETED,
+            ParkTransaction.exit_time >= start_utc,
+            ParkTransaction.exit_time <= end_utc,
+        )
     )
 
     result = await db.execute(stmt)
@@ -61,13 +82,18 @@ async def get_revenue_today(db: AsyncSession) -> dict:
 # ---------------------------------------------------------------------------
 async def get_revenue_by_shift(db: AsyncSession) -> dict:
     start_utc, end_utc, date_label = get_today_range_wib_to_utc()
+    refunded = _refunded_amounts_subquery()
 
     stmt = (
         select(
             ParkTransaction.exit_shift_id,
-            func.coalesce(func.sum(ParkTransaction.total_fee), 0).label("total_revenue"),
+            func.coalesce(
+                func.sum(ParkTransaction.total_fee - func.coalesce(refunded.c.refunded_amount, 0)),
+                0,
+            ).label("total_revenue"),
             func.count(ParkTransaction.id).label("total_transactions"),
         )
+        .outerjoin(refunded, refunded.c.transaction_id == ParkTransaction.id)
         .where(
             ParkTransaction.status_parking == ParkingStatus.COMPLETED,
             ParkTransaction.exit_time >= start_utc,
@@ -222,42 +248,61 @@ async def get_payment_distribution(db: AsyncSession) -> dict:
 async def get_executive_insight(db: AsyncSession) -> dict:
     start_today_utc, end_today_utc, date_label = get_today_range_wib_to_utc()
     start_yesterday_utc, end_yesterday_utc, _ = get_yesterday_range_wib_to_utc()
- 
+    refunded = _refunded_amounts_subquery()
+
     # --- Revenue hari ini ---
-    stmt_revenue_today = select(
-        func.coalesce(func.sum(ParkTransaction.total_fee), 0)
-    ).where(
-        ParkTransaction.status_parking == ParkingStatus.COMPLETED,
-        ParkTransaction.exit_time >= start_today_utc,
-        ParkTransaction.exit_time <= end_today_utc,
+    stmt_revenue_today = (
+        select(
+            func.coalesce(
+                func.sum(ParkTransaction.total_fee - func.coalesce(refunded.c.refunded_amount, 0)),
+                0,
+            )
+        )
+        .outerjoin(refunded, refunded.c.transaction_id == ParkTransaction.id)
+        .where(
+            ParkTransaction.status_parking == ParkingStatus.COMPLETED,
+            ParkTransaction.exit_time >= start_today_utc,
+            ParkTransaction.exit_time <= end_today_utc,
+        )
     )
     revenue_today = (await db.execute(stmt_revenue_today)).scalar_one()
- 
+
     # --- Revenue kemarin ---
-    stmt_revenue_yesterday = select(
-        func.coalesce(func.sum(ParkTransaction.total_fee), 0)
-    ).where(
-        ParkTransaction.status_parking == ParkingStatus.COMPLETED,
-        ParkTransaction.exit_time >= start_yesterday_utc,
-        ParkTransaction.exit_time <= end_yesterday_utc,
+    stmt_revenue_yesterday = (
+        select(
+            func.coalesce(
+                func.sum(ParkTransaction.total_fee - func.coalesce(refunded.c.refunded_amount, 0)),
+                0,
+            )
+        )
+        .outerjoin(refunded, refunded.c.transaction_id == ParkTransaction.id)
+        .where(
+            ParkTransaction.status_parking == ParkingStatus.COMPLETED,
+            ParkTransaction.exit_time >= start_yesterday_utc,
+            ParkTransaction.exit_time <= end_yesterday_utc,
+        )
     )
     revenue_yesterday = (await db.execute(stmt_revenue_yesterday)).scalar_one()
- 
+
     revenue_growth_percentage = safe_growth_percentage(revenue_today, revenue_yesterday)
- 
+
     # --- Shift dengan pendapatan tertinggi hari ini ---
     stmt_highest_shift = (
         select(
             ParkTransaction.exit_shift_id,
-            func.coalesce(func.sum(ParkTransaction.total_fee), 0).label("shift_revenue"),
+            func.coalesce(
+                func.sum(ParkTransaction.total_fee - func.coalesce(refunded.c.refunded_amount, 0)),
+                0,
+            ).label("shift_revenue"),
         )
+        .outerjoin(refunded, refunded.c.transaction_id == ParkTransaction.id)
         .where(
             ParkTransaction.status_parking == ParkingStatus.COMPLETED,
             ParkTransaction.exit_time >= start_today_utc,
             ParkTransaction.exit_time <= end_today_utc,
         )
         .group_by(ParkTransaction.exit_shift_id)
-        .order_by(func.sum(ParkTransaction.total_fee).desc())
+        .order_by(func.sum(ParkTransaction.total_fee - func.coalesce(refunded.c.refunded_amount, 0)).desc())
         .limit(1)
     )
     highest_shift_row = (await db.execute(stmt_highest_shift)).first()
