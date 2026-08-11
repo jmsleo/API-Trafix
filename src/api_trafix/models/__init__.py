@@ -18,6 +18,14 @@ from api_trafix.models.operator_shift_assignments import (
 )
 from api_trafix.models.payments import Payment, PaymentMethod, PaymentStatus
 from api_trafix.models.park_transactions import ParkTransaction, ParkingStatus, DetectionMethod
+from api_trafix.models.signage import (
+    Signage,
+    SignageAssignment,
+    SignageContent,
+    SignageContentType,
+    SignageSchedule,
+    SignageStatus,
+)
 
 __all__ = [
     "AuditLog",
@@ -49,5 +57,11 @@ __all__ = [
     "PaymentStatus",
     "ParkTransaction",
     "ParkingStatus",
-    "DetectionMethod"
+    "DetectionMethod",
+    "Signage",
+    "SignageStatus",
+    "SignageContent",
+    "SignageContentType",
+    "SignageAssignment",
+    "SignageSchedule",
 ]
