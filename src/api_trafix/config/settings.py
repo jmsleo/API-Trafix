@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="", validation_alias="REDIS_URL")
     redis_session_expire: int = 3600
     redis_cache_expire: int = 300
+    subscription_auto_expire_interval_seconds: int = 300
 
     secret_key: str = Field(default="", validation_alias="SECRET_KEY")
     jwt_algorithm: str = "HS256"

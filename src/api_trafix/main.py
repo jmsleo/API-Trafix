@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -11,6 +12,7 @@ from api_trafix.config.database import init_db
 from api_trafix.config.redis import close_redis
 from api_trafix.config.settings import get_settings
 from api_trafix.core.middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
+from api_trafix.core.scheduler import run_periodic_tasks
 from api_trafix.routes import member, shift, vehicle_type
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes.users import router as users_router
@@ -19,7 +21,11 @@ from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    background_task = asyncio.create_task(run_periodic_tasks())
     yield
+    background_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await background_task
     await close_redis()
 
 app = FastAPI(
