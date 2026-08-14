@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     backup_restore_timeout_seconds: int = 300
     backup_upload_max_mb: int = 2048
 
+    signage_media_dir: str = Field(default="media/signages", validation_alias="SIGNAGE_MEDIA_DIR")
+    signage_upload_max_mb: int = 50
+    signage_allowed_image_extensions: str = "jpg,jpeg,png,gif,webp"
+    signage_allowed_video_extensions: str = "mp4,mov"
+    signage_broadcast_sync_interval_seconds: int = 60
+
     # Gate cycle: site identity printed on tickets and used on the wire.
     site_name: str = Field(default="Trafix Parking", validation_alias="SITE_NAME")
     site_address: str = Field(default="", validation_alias="SITE_ADDRESS")
@@ -74,7 +80,11 @@ class Settings(BaseSettings):
     )
 
     allowed_origins: list[str] = Field(
-        default=["http://localhost:5173", "http://localhost:3000"],
+        default=[
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "tauri://localhost",
+        ],
         validation_alias="ALLOWED_ORIGINS",
     )
 

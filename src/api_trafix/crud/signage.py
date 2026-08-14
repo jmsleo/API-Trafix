@@ -187,6 +187,30 @@ async def create_content(db: AsyncSession, payload: SignageContentCreate) -> Sig
     return db_obj
 
 
+async def create_media_content(
+    db: AsyncSession,
+    *,
+    title: str,
+    content_type: SignageContentType,
+    mime_type: str,
+    file_path: str,
+    file_size_bytes: int,
+) -> SignageContent:
+    db_obj = SignageContent(
+        title=title,
+        content_type=content_type,
+        body="",
+        is_active=True,
+        file_path=file_path,
+        mime_type=mime_type,
+        file_size_bytes=file_size_bytes,
+    )
+    db.add(db_obj)
+    await db.commit()
+    await db.refresh(db_obj)
+    return db_obj
+
+
 async def update_content(
     db: AsyncSession, db_obj: SignageContent, payload: SignageContentUpdate
 ) -> SignageContent:

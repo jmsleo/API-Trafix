@@ -13,7 +13,7 @@ _HEADER_NAMES = frozenset(
     }
 )
 
-_UPLOAD_EXEMPT_PREFIXES = frozenset({"/backups/upload"})
+_UPLOAD_EXEMPT_PREFIXES = frozenset({"/backups/upload", "/signages/contents/upload"})
 
 
 def _set_header(headers: list[tuple[bytes, bytes]], name: str, value: str) -> list[tuple[bytes, bytes]]:
