@@ -2,13 +2,23 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 
 from api_trafix.config.database import Base
 
 
 class BackupStatus(str, enum.Enum):
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -20,6 +30,7 @@ class Backup(Base):
     filename = Column(String(255), nullable=False, unique=True)
     format = Column(String(10), nullable=False, default="custom")
     size_bytes = Column(BigInteger, nullable=False, default=0)
+    progress = Column(Integer, nullable=False, default=0)
     status = Column(
         Enum(BackupStatus, values_callable=lambda e: [v.value for v in e], name="backup_status"),
         nullable=False,

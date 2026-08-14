@@ -19,6 +19,7 @@ class BackupRead(BaseModel):
     filename: str
     format: str
     size_bytes: int
+    progress: int = 0
     status: BackupStatus
     error_message: str | None
     created_by: UUID | None
