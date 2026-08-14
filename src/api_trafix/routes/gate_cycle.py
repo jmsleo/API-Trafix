@@ -352,7 +352,7 @@ async def check_image_gateout(request: Request) -> JSONResponse:
             "plate_num": plate_num,
             "image": {"available": available, "message": message, "url_image": url_image},
             "gatein": {
-                "transaction_id": quote.transaction_id,
+                "transaction_id": str(quote.transaction_id),
                 "transaction_code": quote.transaction_code,
                 "police_number": quote.police_number,
                 "card_number": quote.card_number,
