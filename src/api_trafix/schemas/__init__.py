@@ -13,8 +13,14 @@ from api_trafix.schemas.auth import (
     TokenPair,
 )
 from api_trafix.schemas.backup import BackupPage, BackupRead, BackupRestoreRequest
-from api_trafix.schemas.device import DeviceBase, DeviceCreate, DeviceRead, DeviceUpdate
-from api_trafix.schemas.gate import GateBase, GateCreate, GateRead, GateUpdate
+from api_trafix.schemas.device import (
+    DeviceBase,
+    DeviceCreate,
+    DevicePage,
+    DeviceRead,
+    DeviceUpdate,
+)
+from api_trafix.schemas.gate import GateBase, GateCreate, GatePage, GateRead, GateUpdate
 from api_trafix.schemas.member import (
     MemberBase,
     MemberCreate,
@@ -138,11 +144,13 @@ __all__ = [
     "TokenPair",
     "DeviceBase",
     "DeviceCreate",
+    "DevicePage",
     "DeviceRead",
     "DeviceUpdate",
     "GateBase",
     "GateBrief",
     "GateCreate",
+    "GatePage",
     "GateRead",
     "GateUpdate",
     "LoginRequest",
