@@ -1,10 +1,12 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api_trafix.config.database import async_session_maker, init_db
@@ -15,11 +17,18 @@ from api_trafix.core.middleware import (
     SecurityHeadersMiddleware,
 )
 from api_trafix.core.scheduler import run_periodic_tasks
+from api_trafix.services.device_registry import DeviceRegistry
+from api_trafix.services.gate_cycle import GateCycleConfig, GateCycleService, NullPublisher
+from api_trafix.services.mqtt_bus import MqttBus
+from api_trafix.services.orchestrator import Orchestrator
+from api_trafix.services.publisher import MqttPublisher
 from api_trafix.services.seed import seed_reference_data
+from api_trafix.services.snapshots import SnapshotStore
 from api_trafix.routes import (
     backup,
     finance_dashboard,
     finance_reports,
+    gate_cycle,
     member,
     member_subscription,
     member_vehicle,
@@ -33,17 +42,68 @@ from api_trafix.routes import (
 )
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_vehicle, member_subscription, signage, backup, audit_log
+from api_trafix.routes import devices, gates
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     async with async_session_maker() as db:
         await seed_reference_data(db)
+
+    settings = get_settings()
+    storage = SnapshotStore(Path(settings.storage_dir))
+    registry = DeviceRegistry(async_session_maker)
+    await registry.reload()
+    app.state.device_registry = registry
+
+    orchestrator: Orchestrator | None = None
+    if settings.mqtt_enabled:
+        bus = MqttBus(
+            host=settings.mqtt_host,
+            port=settings.mqtt_port,
+            username=settings.mqtt_username or None,
+            password=settings.mqtt_password or None,
+            client_id=settings.mqtt_client_id_prefix,
+            keepalive=settings.mqtt_keepalive,
+        )
+        publisher = MqttPublisher(
+            bus,
+            registry,
+            pulse_ms=settings.barrier_pulse_ms,
+            beep_ms=settings.barrier_beep_ms,
+        )
+    else:
+        publisher = NullPublisher()
+
+    app.state.gate_cycle = GateCycleService(
+        async_session_maker,
+        publisher=publisher,
+        storage=storage,
+        config=GateCycleConfig(
+            site_name=settings.site_name,
+            site_address=settings.site_address,
+            storage_dir=Path(settings.storage_dir),
+            require_plate_match=settings.require_plate_match,
+            command_exit_barrier=settings.command_exit_barrier,
+        ),
+    )
+
+    if settings.mqtt_enabled:
+        orchestrator = Orchestrator(
+            settings=settings,
+            bus=bus,
+            registry=registry,
+        )
+        await orchestrator.start()
+
     background_task = asyncio.create_task(run_periodic_tasks())
     yield
     background_task.cancel()
     with suppress(asyncio.CancelledError):
         await background_task
+    if orchestrator is not None:
+        await orchestrator.stop()
+    storage.shutdown()
     await close_redis()
 
 app = FastAPI(
@@ -118,6 +178,12 @@ app.include_router(member_subscription.router)
 app.include_router(signage.router)
 app.include_router(backup.router)
 app.include_router(audit_log.router)
+app.include_router(gate_cycle.router)
+app.include_router(gates.router)
+app.include_router(devices.router)
+storage_dir = Path(get_settings().storage_dir)
+storage_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/storage", StaticFiles(directory=storage_dir), name="storage")
 
 @app.get("/")
 async def root():
