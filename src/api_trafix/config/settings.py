@@ -39,6 +39,40 @@ class Settings(BaseSettings):
     backup_restore_timeout_seconds: int = 300
     backup_upload_max_mb: int = 2048
 
+    # Gate cycle: site identity printed on tickets and used on the wire.
+    site_name: str = Field(default="Trafix Parking", validation_alias="SITE_NAME")
+    site_address: str = Field(default="", validation_alias="SITE_ADDRESS")
+    storage_dir: str = Field(default="storage", validation_alias="STORAGE_DIR")
+    api_base_url: str = Field(
+        default="http://127.0.0.1:8000", validation_alias="API_BASE_URL"
+    )
+
+    # Gate cycle policies. require_plate_match off by default, because on site
+    # the two cameras' plate strings genuinely disagree and refusing would
+    # strand real drivers.
+    require_plate_match: bool = False
+    command_exit_barrier: bool = True
+    lpr_timeout_seconds: float = 5.0
+    lpr_retries: int = 1
+    button_debounce_seconds: float = 5.0
+    barrier_pulse_ms: int = 1000
+    barrier_beep_ms: int = 100
+    # An unregistered (or expired) RFID tap must not strand the driver at the
+    # barrier: fall back to the paper-ticket flow instead of refusing.
+    card_fallback_to_ticket: bool = True
+
+    # MQTT bridge to the gate boards. Disabled by default: the gate cycle then
+    # uses a NullPublisher and no broker is contacted.
+    mqtt_enabled: bool = Field(default=False, validation_alias="MQTT_ENABLED")
+    mqtt_host: str = Field(default="127.0.0.1", validation_alias="MQTT_HOST")
+    mqtt_port: int = Field(default=1883, validation_alias="MQTT_PORT")
+    mqtt_keepalive: int = Field(default=60, validation_alias="MQTT_KEEPALIVE")
+    mqtt_username: str = Field(default="bssparking", validation_alias="MQTT_USERNAME")
+    mqtt_password: str = Field(default="BCTDev_2025", validation_alias="MQTT_PASSWORD")
+    mqtt_client_id_prefix: str = Field(
+        default="api-trafix", validation_alias="MQTT_CLIENT_ID_PREFIX"
+    )
+
     allowed_origins: list[str] = Field(
         default=["http://localhost:5173", "http://localhost:3000"],
         validation_alias="ALLOWED_ORIGINS",
