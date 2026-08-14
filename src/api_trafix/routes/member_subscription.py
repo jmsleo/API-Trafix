@@ -9,6 +9,7 @@ from api_trafix.crud import member_subscription as crud
 from api_trafix.crud import subscription_plan as plan_crud
 from api_trafix.models import User, MemberStatus
 from api_trafix.services import subscriptions as subscription_service
+from api_trafix.services.audit import log_action
 from api_trafix.schemas.member_subscription import (
     MemberSubscriptionCreate,
     MemberSubscriptionPage,
@@ -60,7 +61,7 @@ async def get_member_subscription(
 async def subscribe_member(
     payload: MemberSubscriptionCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     member = await member_crud.get_by_id(db, payload.member_id)
     if member is None:
@@ -88,14 +89,23 @@ async def subscribe_member(
             detail="Member already has an active subscription",
         )
 
-    return await crud.create(db, payload, plan)
+    db_obj = await crud.create(db, payload, plan)
+    await log_action(
+        db,
+        module="member-subscription",
+        action="create",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Subscribed member '{member.name}' to plan '{plan.name}'",
+    )
+    return db_obj
 
 
 @router.post("/{subscription_id}/cancel", response_model=MemberSubscriptionRead)
 async def cancel_member_subscription(
     subscription_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, subscription_id)
     if db_obj is None:
@@ -108,14 +118,23 @@ async def cancel_member_subscription(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only an active subscription can be cancelled",
         )
-    return await crud.cancel(db, db_obj)
+    db_obj = await crud.cancel(db, db_obj)
+    await log_action(
+        db,
+        module="member-subscription",
+        action="cancel",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Cancelled subscription for member '{db_obj.member.name}'",
+    )
+    return db_obj
 
 
 @router.delete("/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_member_subscription(
     subscription_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, subscription_id)
     if db_obj is None:
@@ -123,5 +142,13 @@ async def delete_member_subscription(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Member subscription not found",
         )
+    await log_action(
+        db,
+        module="member-subscription",
+        action="delete",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Deleted subscription for member '{db_obj.member.name}'",
+    )
     await crud.delete(db, db_obj)
     return None

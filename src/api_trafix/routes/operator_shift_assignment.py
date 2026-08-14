@@ -8,6 +8,7 @@ from api_trafix.crud import operator_shift_assignment as crud
 from api_trafix.crud import shift as shift_crud
 from api_trafix.crud import users as user_crud
 from api_trafix.models import User, UserRole, UserStatus
+from api_trafix.services.audit import log_action
 from api_trafix.schemas.operator_shift_assignment import (
     OperatorShiftAssignmentCreate,
     OperatorShiftAssignmentPage,
@@ -54,7 +55,7 @@ async def get_operator_shift_assignment(
 async def assign_shift_to_operator(
     payload: OperatorShiftAssignmentCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     operator = await user_crud.get_by_id(db, payload.operator_id)
     if operator is None:
@@ -87,14 +88,23 @@ async def assign_shift_to_operator(
             detail="Operator is already assigned to this shift",
         )
 
-    return await crud.create(db, payload)
+    db_obj = await crud.create(db, payload)
+    await log_action(
+        db,
+        module="operator-shift",
+        action="create",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Assigned operator '{operator.username}' to shift '{shift.name}'",
+    )
+    return db_obj
 
 
 @router.delete("/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_operator_shift_assignment(
     assignment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, assignment_id)
     if db_obj is None:
@@ -102,5 +112,13 @@ async def delete_operator_shift_assignment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Operator shift assignment not found",
         )
+    await log_action(
+        db,
+        module="operator-shift",
+        action="delete",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Removed operator shift assignment {assignment_id}",
+    )
     await crud.delete(db, db_obj)
     return None

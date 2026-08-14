@@ -14,6 +14,7 @@ from api_trafix.crud import gate as gate_crud
 from api_trafix.crud import operator_session as crud
 from api_trafix.crud import shift as shift_crud
 from api_trafix.models import OperatorSessionStatus, User, UserRole
+from api_trafix.services.audit import log_action
 from api_trafix.schemas.operator_session import (
     OperatorSessionPage,
     OperatorSessionRead,
@@ -73,7 +74,16 @@ async def start_operator_session(
             detail="Operator already has an active session",
         )
 
-    return await crud.start(db, payload, operator)
+    db_obj = await crud.start(db, payload, operator)
+    await log_action(
+        db,
+        module="operator-session",
+        action="start",
+        user_id=operator.id,
+        role=operator.role.value,
+        description=f"Operator '{operator.username}' started session at gate '{gate.name}'",
+    )
+    return db_obj
 
 
 @router.post("/{session_id}/end", response_model=OperatorSessionRead)
@@ -96,7 +106,16 @@ async def end_operator_session(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not allowed to close this session",
         )
-    return await crud.end(db, db_obj)
+    db_obj = await crud.end(db, db_obj)
+    await log_action(
+        db,
+        module="operator-session",
+        action="end",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Ended operator session {session_id}",
+    )
+    return db_obj
 
 
 @router.get("/{session_id}", response_model=OperatorSessionRead)

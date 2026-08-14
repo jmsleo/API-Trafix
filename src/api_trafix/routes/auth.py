@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api_trafix.config.database import get_db
+from api_trafix.config.database import async_session_maker, get_db
 from api_trafix.config.redis import get_redis
 from api_trafix.core.dependencies import get_current_user
 from api_trafix.core.ratelimit import (
@@ -25,6 +25,7 @@ from api_trafix.core.security import (
 from api_trafix.models import User
 from api_trafix.schemas import LoginRequest, LogoutRequest, RefreshRequest, TokenPair
 from api_trafix.schemas.user import UserRead
+from api_trafix.services.audit import log_action
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -90,6 +91,10 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
     refresh_token, jti = create_refresh_token(str(user.id), role)
     await _store_refresh_jti(jti, str(user.id))
 
+    await log_action(
+        db, "auth", "login", user.id, role, f"User '{data.username}' logged in",
+    )
+
     return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
 
@@ -148,6 +153,16 @@ async def logout(data: LogoutRequest):
             if access_jti:
                 r = await get_redis()
                 await r.setex(_blacklist_key(access_jti), access_token_expire_seconds(), "1")
+
+    user_id = payload.get("sub")
+    if user_id:
+        async with async_session_maker() as db:
+            user = await db.get(User, user_id)
+            if user is not None:
+                await log_action(
+                    db, "auth", "logout", user.id, user.role.value,
+                    f"User '{user.username}' logged out",
+                )
 
 
 @router.get("/me", response_model=UserRead)

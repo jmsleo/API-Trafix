@@ -8,6 +8,7 @@ from api_trafix.crud import member as member_crud
 from api_trafix.crud import member_vehicle as crud
 from api_trafix.crud import vehicle_type as vehicle_type_crud
 from api_trafix.models import User, MemberStatus, VehicleStatus
+from api_trafix.services.audit import log_action
 from api_trafix.schemas.member_vehicle import (
     MemberVehicleCreate,
     MemberVehiclePage,
@@ -55,7 +56,7 @@ async def get_member_vehicle(vehicle_id: uuid.UUID, db: AsyncSession = Depends(g
 async def create_member_vehicle(
     payload: MemberVehicleCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     member = await member_crud.get_by_id(db, payload.member_id)
     if member is None:
@@ -81,7 +82,16 @@ async def create_member_vehicle(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Police number already registered"
         )
 
-    return await crud.create(db, payload)
+    db_obj = await crud.create(db, payload)
+    await log_action(
+        db,
+        module="member-vehicle",
+        action="create",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Registered vehicle '{db_obj.police_number}' for member '{member.name}'",
+    )
+    return db_obj
 
 
 @router.put("/{vehicle_id}", response_model=MemberVehicleRead)
@@ -89,7 +99,7 @@ async def update_member_vehicle(
     vehicle_id: uuid.UUID,
     payload: MemberVehicleUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, vehicle_id)
     if db_obj is None:
@@ -105,14 +115,23 @@ async def update_member_vehicle(
                 detail="Police number already registered",
             )
 
-    return await crud.update(db, db_obj, payload)
+    db_obj = await crud.update(db, db_obj, payload)
+    await log_action(
+        db,
+        module="member-vehicle",
+        action="update",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Updated vehicle '{db_obj.police_number}'",
+    )
+    return db_obj
 
 
 @router.delete("/{vehicle_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_member_vehicle(
     vehicle_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, vehicle_id)
     if db_obj is None:
@@ -124,5 +143,13 @@ async def delete_member_vehicle(
             status_code=status.HTTP_409_CONFLICT,
             detail="Vehicle is used by park transactions",
         )
+    await log_action(
+        db,
+        module="member-vehicle",
+        action="delete",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Deleted vehicle '{db_obj.police_number}'",
+    )
     await crud.delete(db, db_obj)
     return None

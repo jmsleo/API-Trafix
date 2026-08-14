@@ -6,6 +6,7 @@ from api_trafix.config.database import get_db
 from api_trafix.core.dependencies import get_current_admin
 from api_trafix.crud import subscription_plan as crud
 from api_trafix.models import User
+from api_trafix.services.audit import log_action
 from api_trafix.schemas.subscription_plan import (
     SubscriptionPlanCreate,
     SubscriptionPlanPage,
@@ -48,14 +49,23 @@ async def get_subscription_plan(plan_id: uuid.UUID, db: AsyncSession = Depends(g
 async def create_subscription_plan(
     payload: SubscriptionPlanCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     existing = await crud.get_by_name(db, payload.name)
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Name already exists"
         )
-    return await crud.create(db, payload)
+    db_obj = await crud.create(db, payload)
+    await log_action(
+        db,
+        module="subscription-plan",
+        action="create",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Created subscription plan '{db_obj.name}'",
+    )
+    return db_obj
 
 
 @router.put("/{plan_id}", response_model=SubscriptionPlanRead)
@@ -63,7 +73,7 @@ async def update_subscription_plan(
     plan_id: uuid.UUID,
     payload: SubscriptionPlanUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, plan_id)
     if db_obj is None:
@@ -78,7 +88,16 @@ async def update_subscription_plan(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Name already exists"
             )
 
-    return await crud.update(db, db_obj, payload)
+    db_obj = await crud.update(db, db_obj, payload)
+    await log_action(
+        db,
+        module="subscription-plan",
+        action="update",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Updated subscription plan '{db_obj.name}'",
+    )
+    return db_obj
 
 
 @router.patch("/{plan_id}/status", response_model=SubscriptionPlanRead)
@@ -86,21 +105,30 @@ async def update_subscription_plan_status(
     plan_id: uuid.UUID,
     payload: SubscriptionPlanStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, plan_id)
     if db_obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Subscription plan not found"
         )
-    return await crud.update(db, db_obj, payload)
+    db_obj = await crud.update(db, db_obj, payload)
+    await log_action(
+        db,
+        module="subscription-plan",
+        action="update-status",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Changed subscription plan '{db_obj.name}' active status to {db_obj.is_active}",
+    )
+    return db_obj
 
 
 @router.delete("/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_subscription_plan(
     plan_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     db_obj = await crud.get_by_id(db, plan_id)
     if db_obj is None:
@@ -112,5 +140,13 @@ async def delete_subscription_plan(
             status_code=status.HTTP_409_CONFLICT,
             detail="Plan is in use by member subscriptions",
         )
+    await log_action(
+        db,
+        module="subscription-plan",
+        action="delete",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Deleted subscription plan '{db_obj.name}'",
+    )
     await crud.delete(db, db_obj)
     return None
