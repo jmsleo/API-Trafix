@@ -31,8 +31,17 @@ MIGRATION_SQL = os.path.join(
     "2026_08_14_gate_cycle_schema.sql",
 )
 
+MIGRATION_FEE_FIELDS_SQL = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "migrations",
+    "2026_08_14_gate_cycle_fee_fields.sql",
+)
+
 with open(MIGRATION_SQL, encoding="utf-8") as _handle:
     MIGRATION_STATEMENTS = _handle.read()
+
+with open(MIGRATION_FEE_FIELDS_SQL, encoding="utf-8") as _handle:
+    MIGRATION_STATEMENTS += "\n" + _handle.read()
 
 
 def _pg_params() -> dict:
