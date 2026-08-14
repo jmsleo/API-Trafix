@@ -2,6 +2,7 @@ import api_trafix
 from api_trafix.models.audit_logs import AuditLog
 from api_trafix.models.backups import Backup, BackupStatus
 from api_trafix.models.devices import Device
+from api_trafix.models.gate_events import GateEvent
 from api_trafix.models.gates import Gate, GateStatus, GateType
 from api_trafix.models.member_subscriptions import MemberSubscription
 from api_trafix.models.member_vehicles import MemberVehicle
@@ -39,6 +40,7 @@ __all__ = [
     "DetectionMethod",
     "Device",
     "Gate",
+    "GateEvent",
     "GateStatus",
     "GateType",
     "Member",

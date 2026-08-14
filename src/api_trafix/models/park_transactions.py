@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Enum, DateTime, ForeignKey, String, Boolean, Integer
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,7 +32,7 @@ class ParkTransaction(Base):
     ticket_number: Mapped[str | None] = mapped_column(
         String, unique=True, nullable=True
     )
-    police_number: Mapped[str] = mapped_column(String, nullable=False)
+    police_number: Mapped[str | None] = mapped_column(String, nullable=True)
 
     vehicle_type_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("vehicle_types.id"), nullable=False
@@ -55,15 +55,15 @@ class ParkTransaction(Base):
         UUID(as_uuid=True), ForeignKey("gates.id"), nullable=True
     )
 
-    entry_shift_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("shifts.id"), nullable=False
+    entry_shift_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("shifts.id"), nullable=True
     )
     exit_shift_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("shifts.id"), nullable=True
     )
 
-    entry_operator_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    entry_operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     exit_operator_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
@@ -92,6 +92,21 @@ class ParkTransaction(Base):
         ),
         nullable=False,
     )
+
+    # Gate-cycle columns (mirror of the mock's transactions table). The wire
+    # format the gate hardware / Tauri cashier expect uses these.
+    card_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    payment_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payment_type: Mapped[str] = mapped_column(String(10), nullable=False, default="cash")
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    plate_out: Mapped[str | None] = mapped_column(String, nullable=True)
+    keterangan: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cam_in: Mapped[str] = mapped_column(String(255), nullable=False, default="-")
+    camin_lpr: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cam_out: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    camout_lpr: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cam_payment: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

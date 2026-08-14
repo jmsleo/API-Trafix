@@ -21,6 +21,12 @@ class ParkingRate(Base):
     name = Column(String(100), nullable=False)
     vehicle_type_id = Column(UUID(as_uuid=True), ForeignKey("vehicle_types.id"), nullable=False)
     base_price = Column(Integer, nullable=False)
+    # Flat-mode fields ported from the mock's parking_fees table. base_price is
+    # the flat rate; the rest drive the gate-out calculation and the ticket
+    # footer (lost-ticket fee + overnight stay fee are printed on every ticket).
+    grace_period_minutes = Column(Integer, nullable=True)
+    ticket_charge = Column(Integer, nullable=True)
+    stay_charge = Column(Integer, nullable=True)
     status = Column(
         Enum(RateStatus, values_callable=lambda e: [v.value for v in e], name="rate_status"),
         nullable=False,

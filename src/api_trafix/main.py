@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api_trafix.config.database import init_db
+from api_trafix.config.database import async_session_maker, init_db
 from api_trafix.config.redis import close_redis
 from api_trafix.config.settings import get_settings
 from api_trafix.core.middleware import (
@@ -15,6 +15,7 @@ from api_trafix.core.middleware import (
     SecurityHeadersMiddleware,
 )
 from api_trafix.core.scheduler import run_periodic_tasks
+from api_trafix.services.seed import seed_reference_data
 from api_trafix.routes import (
     backup,
     finance_dashboard,
@@ -36,6 +37,8 @@ from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    async with async_session_maker() as db:
+        await seed_reference_data(db)
     background_task = asyncio.create_task(run_periodic_tasks())
     yield
     background_task.cancel()

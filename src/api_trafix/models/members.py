@@ -23,6 +23,9 @@ class Member(Base):
     name = Column(String(100), nullable=False)
     email = Column(String(100), nullable=True)
     phone_number = Column(String(20), nullable=True)
+    # RFID tag for member auto-entry / gate-out-by-card. Optional: not every
+    # member carries a card, and the leading zero is significant.
+    card_number = Column(String(255), nullable=True, unique=True)
     status = Column(
         Enum(MemberStatus, values_callable=lambda e: [v.value for v in e], name="member_status"),
         nullable=False,

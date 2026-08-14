@@ -23,6 +23,9 @@ class Gate(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(100), nullable=False)
+    # The wire id the LPR/gate hardware uses ("1", "2"), decoupled from the
+    # UUID primary key. The gate cycle maps a device's gate number to this row.
+    gate_code = Column(String(16), nullable=True, unique=True)
     type = Column(
         Enum(GateType, values_callable=lambda e: [v.value for v in e], name="gate_type"),
         nullable=False,
