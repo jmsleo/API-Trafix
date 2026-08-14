@@ -1,13 +1,16 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.config.database import get_db
+from api_trafix.config.settings import get_settings
 from api_trafix.core.dependencies import get_current_admin
 from api_trafix.crud import signage as crud
 from api_trafix.models import SignageContentType, User
+from api_trafix.services import signage_media as media_service
 from api_trafix.services.audit import log_action
 
 from api_trafix.schemas.signage import (
@@ -156,6 +159,76 @@ async def update_content_status(
     return db_obj
 
 
+@router.post("/contents/upload", response_model=SignageContentRead, status_code=status.HTTP_201_CREATED)
+async def upload_content(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    content_type: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    try:
+        type_filter = SignageContentType(content_type)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid content_type, must be one of {[t.value for t in SignageContentType]}",
+        )
+
+    try:
+        mime = media_service.validate_upload(type_filter, file.filename)
+    except media_service.SignageMediaError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    max_bytes = get_settings().signage_upload_max_mb * 1024 * 1024
+    total = 0
+    chunks: list[bytes] = []
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File exceeds limit of {get_settings().signage_upload_max_mb} MB",
+            )
+        chunks.append(chunk)
+
+    if total == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
+
+    stored_name = media_service.save_upload(type_filter, mime, b"".join(chunks), file.filename)
+    db_obj = await crud.create_media_content(
+        db,
+        title=title.strip(),
+        content_type=type_filter,
+        mime_type=mime,
+        file_path=stored_name,
+        file_size_bytes=total,
+    )
+    await log_action(db, module="signage", action="upload-content", user_id=current_user.id,
+                     role=current_user.role.value,
+                     description=f"Uploaded signage content '{db_obj.title}' ({type_filter.value}, {total} bytes)")
+    return db_obj
+
+
+@router.get("/contents/{content_id}/file")
+async def get_content_file(content_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    db_obj = await crud.get_content(db, content_id)
+    if db_obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+    if db_obj.file_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content has no media file")
+    try:
+        path = media_service.resolve_content_file(db_obj)
+    except media_service.SignageMediaError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media file not found on disk")
+    return FileResponse(path, media_type=db_obj.mime_type or "application/octet-stream", filename=path.name)
+
+
 @router.delete("/contents/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_content(
     content_id: uuid.UUID,
@@ -173,6 +246,7 @@ async def delete_content(
     await log_action(db, module="signage", action="delete-content", user_id=current_user.id,
                      role=current_user.role.value, description=f"Deleted signage content '{db_obj.title}'")
     await crud.delete_content(db, db_obj)
+    media_service.delete_content_file(db_obj)
     return None
 
 

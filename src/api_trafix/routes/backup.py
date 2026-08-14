@@ -35,17 +35,12 @@ async def list_backups(
     )
 
 
-@router.post("/", response_model=BackupRead, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=BackupRead, status_code=status.HTTP_202_ACCEPTED)
 async def create_backup(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_admin),
 ):
-    try:
-        return await service.create_backup(db, user)
-    except service.BackupError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
-        )
+    return await service.start_backup(db, user)
 
 
 @router.post("/upload", response_model=BackupRead, status_code=status.HTTP_201_CREATED)
@@ -92,7 +87,7 @@ async def download_backup(
     return FileResponse(path, filename=db_obj.filename, media_type="application/octet-stream")
 
 
-@router.post("/{backup_id}/restore", response_model=BackupRead)
+@router.post("/{backup_id}/restore", response_model=BackupRead, status_code=status.HTTP_202_ACCEPTED)
 async def restore_backup(
     backup_id: uuid.UUID,
     payload: BackupRestoreRequest,
@@ -107,8 +102,13 @@ async def restore_backup(
     db_obj = await crud.get_by_id(db, backup_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+    if db_obj.status == BackupStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Backup operation already in progress",
+        )
     try:
-        return await service.run_restore(db, db_obj, user)
+        return await service.start_restore(db, db_obj, user)
     except service.BackupError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)

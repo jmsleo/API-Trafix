@@ -8,9 +8,10 @@ from fastapi import UploadFile
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api_trafix.config.database import engine
+from api_trafix.config.database import async_session_maker, engine
 from api_trafix.config.redis import get_redis
 from api_trafix.config.settings import get_settings
+from api_trafix.crud import backup as crud
 from api_trafix.models import Backup, BackupStatus, User
 from api_trafix.services.audit import log_action
 
@@ -63,84 +64,111 @@ async def _flush_cache_and_sessions() -> None:
         pass
 
 
-async def create_backup(db: AsyncSession, user: User) -> Backup:
-    async with _lock:
-        stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-        filename = f"backup_{stamp}_{uuid.uuid4().hex[:8]}.dump"
-        target = _backup_dir() / filename
-        url = _libpq_url()
-        timeout = get_settings().backup_restore_timeout_seconds
+async def start_backup(db: AsyncSession, user: User) -> Backup:
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    filename = f"backup_{stamp}_{uuid.uuid4().hex[:8]}.dump"
 
-        record = Backup(
-            filename=filename,
-            format="custom",
-            size_bytes=0,
-            status=BackupStatus.COMPLETED,
-            created_by=user.id,
-        )
-        db.add(record)
-        await db.commit()
+    record = Backup(
+        filename=filename,
+        format="custom",
+        size_bytes=0,
+        progress=0,
+        status=BackupStatus.RUNNING,
+        created_by=user.id,
+    )
+    db.add(record)
+    await db.commit()
 
-        try:
-            with open(target, "wb") as out:
-                proc = await asyncio.create_subprocess_exec(
-                    "pg_dump",
-                    "-Fc",
-                    "--no-password",
-                    f"--dbname={url}",
-                    stdout=out,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                try:
-                    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                except TimeoutError:
-                    proc.kill()
-                    await proc.wait()
+    asyncio.create_task(_perform_backup(record.id, user.id))
+    return record
+
+
+async def _perform_backup(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    async with _lock, async_session_maker() as db:
+            record = await crud.get_by_id(db, backup_id)
+            if record is None:
+                return
+            user = await db.get(User, user_id)
+            await db.commit()
+            filename = record.filename
+            target = _backup_dir() / filename
+            url = _libpq_url()
+            timeout = get_settings().backup_restore_timeout_seconds
+
+            try:
+                with open(target, "wb") as out:
+                    proc = await asyncio.create_subprocess_exec(
+                        "pg_dump",
+                        "-Fc",
+                        "--no-password",
+                        f"--dbname={url}",
+                        stdout=out,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    try:
+                        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                    except TimeoutError:
+                        proc.kill()
+                        await proc.wait()
+                        target.unlink(missing_ok=True)
+                        record.status = BackupStatus.FAILED
+                        record.error_message = f"Backup timed out after {timeout}s"
+                        record.progress = 0
+                        await db.commit()
+                        if user is not None:
+                            await log_action(
+                                db, "backup", "create", user.id, user.role.value,
+                                f"Backup timed out: {filename}",
+                            )
+                        return
+
+                record.progress = 80
+                await db.commit()
+
+                if proc.returncode != 0:
+                    err = (stderr or b"").decode(errors="replace")[-2000:]
                     target.unlink(missing_ok=True)
                     record.status = BackupStatus.FAILED
-                    record.error_message = f"Backup timed out after {timeout}s"
+                    record.error_message = err or "pg_dump failed"
+                    record.progress = 0
                     await db.commit()
+                    if user is not None:
+                        await log_action(
+                            db, "backup", "create", user.id, user.role.value,
+                            f"Backup failed: {filename}",
+                        )
+                    return
+
+                size = target.stat().st_size
+                if size == 0:
+                    target.unlink(missing_ok=True)
+                    record.status = BackupStatus.FAILED
+                    record.error_message = "Backup file is empty"
+                    record.progress = 0
+                    await db.commit()
+                    if user is not None:
+                        await log_action(
+                            db, "backup", "create", user.id, user.role.value,
+                            f"Backup failed: {filename}",
+                        )
+                    return
+
+                record.size_bytes = size
+                record.status = BackupStatus.COMPLETED
+                record.error_message = None
+                record.progress = 100
+                await db.commit()
+                if user is not None:
                     await log_action(
                         db, "backup", "create", user.id, user.role.value,
-                        f"Backup timed out: {filename}",
+                        f"Created backup {filename} ({size} bytes)",
                     )
-                    raise BackupError(record.error_message) from None
-
-            if proc.returncode != 0:
-                err = (stderr or b"").decode(errors="replace")[-2000:]
+            except Exception as exc:  # noqa: BLE001 - background task: any failure marks the backup FAILED
                 target.unlink(missing_ok=True)
                 record.status = BackupStatus.FAILED
-                record.error_message = err or "pg_dump failed"
+                record.error_message = str(exc)[-2000:]
+                record.progress = 0
                 await db.commit()
-                await log_action(
-                    db, "backup", "create", user.id, user.role.value,
-                    f"Backup failed: {filename}",
-                )
-                raise BackupError(record.error_message)
-
-            size = target.stat().st_size
-            if size == 0:
-                target.unlink(missing_ok=True)
-                record.status = BackupStatus.FAILED
-                record.error_message = "Backup file is empty"
-                await db.commit()
-                raise BackupError(record.error_message)
-
-            record.size_bytes = size
-            await db.commit()
-            await log_action(
-                db, "backup", "create", user.id, user.role.value,
-                f"Created backup {filename} ({size} bytes)",
-            )
-            return record
-        except BackupError:
-            raise
-        except Exception as exc:
-            target.unlink(missing_ok=True)
-            record.status = BackupStatus.FAILED
-            record.error_message = str(exc)[-2000:]
-            await db.commit()
-            raise BackupError(str(exc)) from exc
 
 
 async def import_upload(db: AsyncSession, user: User, upload: UploadFile) -> Backup:
@@ -195,112 +223,143 @@ async def import_upload(db: AsyncSession, user: User, upload: UploadFile) -> Bac
         return record
 
 
-async def run_restore(db: AsyncSession, backup: Backup, user: User) -> Backup:
-    async with _lock:
-        if backup.status != BackupStatus.COMPLETED:
-            raise BackupError("Cannot restore from a failed backup")
-        path = _backup_dir() / backup.filename
-        if not path.is_file():
-            raise BackupError("Backup file not found on disk")
+async def start_restore(db: AsyncSession, backup: Backup, user: User) -> Backup:
+    if backup.status != BackupStatus.COMPLETED:
+        raise BackupError("Cannot restore from a backup that is not completed")
+    path = _backup_dir() / backup.filename
+    if not path.is_file():
+        raise BackupError("Backup file not found on disk")
 
-        url = _libpq_url()
-        timeout = get_settings().backup_restore_timeout_seconds
+    backup.status = BackupStatus.RUNNING
+    backup.progress = 0
+    await db.commit()
 
-        await db.commit()
+    asyncio.create_task(_perform_restore(backup.id, user.id))
+    return backup
 
-        async def _run(cmd: list[str]) -> tuple[int, bytes]:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+
+async def _perform_restore(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    async with _lock, async_session_maker() as db:
+            backup = await crud.get_by_id(db, backup_id)
+            if backup is None:
+                return
+            user = await db.get(User, user_id)
+            path = _backup_dir() / backup.filename
+            if not path.is_file():
+                backup.status = BackupStatus.FAILED
+                backup.error_message = "Backup file not found on disk"
+                await db.commit()
+                return
+
+            await db.commit()
+
+            url = _libpq_url()
+            timeout = get_settings().backup_restore_timeout_seconds
+
+            async def _run(cmd: list[str]) -> tuple[int, bytes]:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                except TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    raise BackupError(f"Restore timed out after {timeout}s") from None
+                return proc.returncode, (stderr or stdout or b"")
+
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
-                raise BackupError(f"Restore timed out after {timeout}s") from None
-            return proc.returncode, (stderr or stdout or b"")
+                if backup.format == "custom":
+                    returncode, output = await _run(
+                        [
+                            "pg_restore",
+                            "--no-password",
+                            "--clean",
+                            "--if-exists",
+                            "--no-owner",
+                            "--no-privileges",
+                            f"--dbname={url}",
+                            str(path),
+                        ]
+                    )
+                    if returncode != 0:
+                        raise BackupError(
+                            output.decode(errors="replace")[-2000:] or "pg_restore failed"
+                        )
+                else:
+                    returncode, output = await _run(
+                        [
+                            "psql",
+                            "--no-password",
+                            f"--dbname={url}",
+                            "-v",
+                            "ON_ERROR_STOP=1",
+                            "-q",
+                            "-c",
+                            "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
+                        ]
+                    )
+                    if returncode != 0:
+                        raise BackupError(
+                            output.decode(errors="replace")[-2000:]
+                            or "Failed to clear schema before restore"
+                        )
+                    returncode, output = await _run(
+                        [
+                            "psql",
+                            "--no-password",
+                            f"--dbname={url}",
+                            "-v",
+                            "ON_ERROR_STOP=1",
+                            "-q",
+                            "-f",
+                            str(path),
+                        ]
+                    )
+                    if returncode != 0:
+                        raise BackupError(
+                            output.decode(errors="replace")[-2000:] or "psql restore failed"
+                        )
+            except BackupError as exc:
+                if user is not None:
+                    await log_action(
+                        db, "backup", "restore", user.id, user.role.value,
+                        f"Restore failed: {backup.filename}: {exc}",
+                    )
+                backup.status = BackupStatus.FAILED
+                backup.error_message = str(exc)
+                backup.progress = 0
+                await db.commit()
+                return
 
-        try:
-            if backup.format == "custom":
-                returncode, output = await _run(
-                    [
-                        "pg_restore",
-                        "--no-password",
-                        "--clean",
-                        "--if-exists",
-                        "--no-owner",
-                        "--no-privileges",
-                        f"--dbname={url}",
-                        str(path),
-                    ]
+            now = datetime.now(UTC)
+            backup_id = backup.id
+            filename = backup.filename
+            user_role = user.role.value if user is not None else None
+
+            await engine.dispose()
+            await db.rollback()
+            await db.execute(
+                update(Backup)
+                .where(Backup.id == backup_id)
+                .values(
+                    status=BackupStatus.COMPLETED,
+                    progress=100,
+                    error_message=None,
+                    last_restored_at=now,
+                    last_restored_by=user_id,
+                    updated_at=now,
                 )
-                if returncode != 0:
-                    raise BackupError(
-                        output.decode(errors="replace")[-2000:] or "pg_restore failed"
-                    )
-            else:
-                returncode, output = await _run(
-                    [
-                        "psql",
-                        "--no-password",
-                        f"--dbname={url}",
-                        "-v",
-                        "ON_ERROR_STOP=1",
-                        "-q",
-                        "-c",
-                        "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
-                    ]
-                )
-                if returncode != 0:
-                    raise BackupError(
-                        output.decode(errors="replace")[-2000:]
-                        or "Failed to clear schema before restore"
-                    )
-                returncode, output = await _run(
-                    [
-                        "psql",
-                        "--no-password",
-                        f"--dbname={url}",
-                        "-v",
-                        "ON_ERROR_STOP=1",
-                        "-q",
-                        "-f",
-                        str(path),
-                    ]
-                )
-                if returncode != 0:
-                    raise BackupError(
-                        output.decode(errors="replace")[-2000:] or "psql restore failed"
-                    )
-        except BackupError as exc:
-            await log_action(
-                db, "backup", "restore", user.id, user.role.value,
-                f"Restore failed: {backup.filename}: {exc}",
             )
-            raise
-
-        now = datetime.now(UTC)
-        db.expunge(backup)
-        backup.last_restored_at = now
-        backup.last_restored_by = user.id
-        backup.updated_at = now
-
-        await engine.dispose()
-        await db.rollback()
-        await db.execute(
-            update(Backup)
-            .where(Backup.id == backup.id)
-            .values(last_restored_at=now, last_restored_by=user.id, updated_at=now)
-        )
-        await db.commit()
-        await _flush_cache_and_sessions()
-        await log_action(
-            db, "backup", "restore", user.id, user.role.value,
-            f"Restored DB from {backup.filename}",
-        )
-        return backup
+            await db.commit()
+            await _flush_cache_and_sessions()
+            if user is not None:
+                await log_action(
+                    db, "backup", "restore", user_id, user_role,
+                    f"Restored DB from {filename}",
+                )
 
 
 async def delete_backup(db: AsyncSession, backup: Backup, user: User) -> None:

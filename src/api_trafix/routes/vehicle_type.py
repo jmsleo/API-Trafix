@@ -106,6 +106,11 @@ async def delete_vehicle_type(
     db_obj = await crud.get_by_id(db, vehicle_type_id)
     if db_obj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle type not found")
+    if await crud.is_in_use(db, vehicle_type_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Vehicle type is used by parking rates or member vehicles",
+        )
     await log_action(
         db,
         module="vehicle-type",

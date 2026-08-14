@@ -4,6 +4,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
+from api_trafix.models.member_vehicles import MemberVehicle
+from api_trafix.models.parking_rates import ParkingRate
 from api_trafix.models.vehicle_types import VehicleStatus, VehicleType
 from api_trafix.schemas.vehicle_type import VehicleTypeCreate, VehicleTypeUpdate
 
@@ -79,3 +81,17 @@ async def update(
 async def delete(db: AsyncSession, db_obj: VehicleType) -> None:
     await db.delete(db_obj)
     await db.commit()
+
+
+async def is_in_use(db: AsyncSession, vehicle_type_id: uuid.UUID) -> bool:
+    rate_result = await db.execute(
+        select(ParkingRate.id).where(ParkingRate.vehicle_type_id == vehicle_type_id).limit(1)
+    )
+    if rate_result.scalar_one_or_none() is not None:
+        return True
+    vehicle_result = await db.execute(
+        select(MemberVehicle.id)
+        .where(MemberVehicle.vehicle_type_id == vehicle_type_id)
+        .limit(1)
+    )
+    return vehicle_result.scalar_one_or_none() is not None

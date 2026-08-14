@@ -3,6 +3,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -27,6 +28,7 @@ class SignageStatus(str, enum.Enum):
 class SignageContentType(str, enum.Enum):
     TEXT = "text"
     IMAGE = "image"
+    VIDEO = "video"
 
 
 class Signage(Base):
@@ -71,6 +73,11 @@ class SignageContent(Base):
     )
     body = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
+    file_path = Column(String(500), nullable=True)
+    mime_type = Column(String(100), nullable=True)
+    file_size_bytes = Column(BigInteger, nullable=True)
+    broadcast_start = Column(DateTime(timezone=True), nullable=True)
+    broadcast_end = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

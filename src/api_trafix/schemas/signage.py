@@ -85,12 +85,11 @@ class SignageContentBase(BaseModel):
 
     title: Title
     content_type: SignageContentType = SignageContentType.TEXT
-    body: Body
     is_active: bool = True
 
 
 class SignageContentCreate(SignageContentBase):
-    pass
+    body: Body
 
 
 class SignageContentUpdate(BaseModel):
@@ -98,8 +97,10 @@ class SignageContentUpdate(BaseModel):
 
     title: Title | None = None
     content_type: SignageContentType | None = None
-    body: Body | None = None
+    body: str | None = None
     is_active: bool | None = None
+    broadcast_start: datetime | None = None
+    broadcast_end: datetime | None = None
 
 
 class SignageContentStatusUpdate(BaseModel):
@@ -110,6 +111,12 @@ class SignageContentStatusUpdate(BaseModel):
 
 class SignageContentRead(SignageContentBase):
     id: UUID
+    body: str = ""
+    file_path: str | None = None
+    mime_type: str | None = None
+    file_size_bytes: int | None = None
+    broadcast_start: datetime | None = None
+    broadcast_end: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -98,7 +98,6 @@ async def update(
         await db.rollback()
         raise
     obj_id = db_obj.id
-    db.expire_all()
     return await get_by_id(db, obj_id)
 
 
