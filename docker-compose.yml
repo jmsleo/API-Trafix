@@ -31,6 +31,27 @@ services:
     depends_on:
       - db
 
+  # Main-server MQTT broker for the gate boards. Credentials come from
+  # MQTT_USERNAME / MQTT_PASSWORD in the project .env (compose substitutes
+  # them here), so the API and the broker share the same config.
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: api-trafix-mqtt
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-bssparking}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-BCTDev_2025}
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./deploy/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./deploy/mosquitto-entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      - mqttdata:/mosquitto/data
+      - mqttlog:/mosquitto/log
+
 volumes:
   pgdata:
   redisdata:
+  mqttdata:
+  mqttlog:
