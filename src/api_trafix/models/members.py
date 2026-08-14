@@ -35,3 +35,4 @@ class Member(Base):
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     created_by_user = relationship("User", back_populates="members", foreign_keys=[created_by])
+    vehicles = relationship("MemberVehicle", back_populates="member")

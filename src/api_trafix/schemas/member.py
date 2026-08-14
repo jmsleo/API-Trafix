@@ -41,10 +41,28 @@ class MemberUpdate(BaseModel):
     created_by: UUID | None = None
 
 
+class MemberVehicleTypeBrief(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    code: str
+    name: str
+
+
+class MemberVehicleBrief(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    police_number: str
+    vehicle_type: MemberVehicleTypeBrief
+    created_at: datetime
+
+
 class MemberRead(MemberBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    vehicles: list[MemberVehicleBrief] = []
 
 
 class MemberPage(BaseModel):

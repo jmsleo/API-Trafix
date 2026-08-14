@@ -24,6 +24,7 @@ class ParkingRate(Base):
     # Flat-mode fields ported from the mock's parking_fees table. base_price is
     # the flat rate; the rest drive the gate-out calculation and the ticket
     # footer (lost-ticket fee + overnight stay fee are printed on every ticket).
+    fee_category = Column(String(20), nullable=False, server_default="flat")
     grace_period_minutes = Column(Integer, nullable=True)
     ticket_charge = Column(Integer, nullable=True)
     stay_charge = Column(Integer, nullable=True)

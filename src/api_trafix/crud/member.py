@@ -2,6 +2,7 @@ import uuid
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from api_trafix.models.member_vehicles import MemberVehicle
 from api_trafix.models.members import Member, MemberStatus
@@ -24,7 +25,9 @@ async def get_all(
     page: int = 1,
     page_size: int = 10,
 ) -> tuple[list[Member], int]:
-    stmt = select(Member)
+    stmt = select(Member).options(
+        selectinload(Member.vehicles).selectinload(MemberVehicle.vehicle_type)
+    )
     count_stmt = select(func.count()).select_from(Member)
 
     if search:
@@ -57,17 +60,27 @@ async def get_all(
 async def block(db: AsyncSession, db_obj: Member) -> Member:
     db_obj.status = MemberStatus.BLOCKED
     await db.commit()
-    await db.refresh(db_obj)
+    db_obj = await get_by_id(db, db_obj.id)
+    assert db_obj is not None
     return db_obj
 
 
 async def get_by_id(db: AsyncSession, member_id: uuid.UUID) -> Member | None:
-    result = await db.execute(select(Member).where(Member.id == member_id))
+    result = await db.execute(
+        select(Member)
+        .options(selectinload(Member.vehicles).selectinload(MemberVehicle.vehicle_type))
+        .where(Member.id == member_id)
+    )
     return result.scalar_one_or_none()
 
 
 async def get_by_member_code(db: AsyncSession, member_code: str) -> Member | None:
     result = await db.execute(select(Member).where(Member.member_code == member_code))
+    return result.scalar_one_or_none()
+
+
+async def get_by_card_number(db: AsyncSession, card_number: str) -> Member | None:
+    result = await db.execute(select(Member).where(Member.card_number == card_number))
     return result.scalar_one_or_none()
 
 
@@ -80,7 +93,8 @@ async def create(db: AsyncSession, payload: MemberCreate) -> Member:
         except IntegrityError:
             await db.rollback()
             continue
-        await db.refresh(db_obj)
+        db_obj = await get_by_id(db, db_obj.id)
+        assert db_obj is not None
         return db_obj
     raise IntegrityError("Could not generate a unique member code", None, None)
 
@@ -95,6 +109,8 @@ async def update(db: AsyncSession, db_obj: Member, payload: MemberUpdate) -> Mem
         await db.rollback()
         raise
     await db.refresh(db_obj)
+    db_obj = await get_by_id(db, db_obj.id)
+    assert db_obj is not None
     return db_obj
 
 
