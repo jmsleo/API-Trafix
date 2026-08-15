@@ -175,6 +175,65 @@ def _amount(value: float) -> str:
     return str(as_int) if as_int == value else str(value)
 
 
+@dataclass(frozen=True)
+class GateOutReceipt:
+    store_name: str
+    trx: str
+    plate: str | None
+    datetime: str
+    exit_datetime: str
+    duration: str
+    total: float
+
+
+def build_gate_out_receipt(receipt: GateOutReceipt) -> list[dict[str, object]]:
+    """The exit (payment) receipt the cashier prints at the gate-out desk.
+
+    A single ``txUartData`` block: store header, ticket facts and the charged
+    total, then feed-and-cut. Same ESC/POS conventions as the entry ticket.
+    """
+    line = CRLF + ESC_ALIGN_CENTER + SEPARATOR_HEX + CRLF
+
+    uart_data = (
+        ESC_ALIGN_CENTER
+        + str_to_hex(receipt.store_name)
+        + CRLF
+        + line
+        + CRLF
+        + ESC_ALIGN_CENTER
+        + str_to_hex("STRUK KELUAR / GATE OUT")
+        + CRLF
+        + CRLF
+        + ESC_ALIGN_CENTER
+        + str_to_hex(f"Plat: {receipt.plate or '-'}")
+        + CRLF
+        + ESC_ALIGN_CENTER
+        + str_to_hex(f"Ticket: {receipt.trx}")
+        + CRLF
+        + ESC_ALIGN_CENTER
+        + str_to_hex(f"Masuk: {receipt.datetime}")
+        + CRLF
+        + ESC_ALIGN_CENTER
+        + str_to_hex(f"Keluar: {receipt.exit_datetime}")
+        + CRLF
+        + ESC_ALIGN_CENTER
+        + str_to_hex(f"Durasi: {receipt.duration}")
+        + CRLF
+        + line
+        + ESC_ALIGN_CENTER
+        + str_to_hex(f"Total: Rp{_amount(receipt.total)}")
+        + CRLF
+        + CRLF
+        + ESC_ALIGN_CENTER
+        + str_to_hex("Terima kasih")
+        + CRLF
+        + FEED_5
+        + CUT
+    )
+
+    return [_uart_block(uart_data)]
+
+
 # ---------------------------------------------------------------------------
 # Decoding, for the mock printer and for tests
 # ---------------------------------------------------------------------------

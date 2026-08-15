@@ -37,6 +37,11 @@ import httpx
 
 from api_trafix.config.settings import Settings
 from api_trafix.services.device_registry import DeviceRegistry, RegistryError
+from api_trafix.services.events import (
+    TYPE_BARRIER_COMMAND,
+    TYPE_BARRIER_OPENED,
+    publish_gate_event,
+)
 from api_trafix.services.protocol import (
     INPUT_ARRIVAL_LOOP,
     INPUT_PASS_LOOP,
@@ -178,6 +183,12 @@ class Orchestrator:
                     await self._on_card(gate, message)
             elif message.method in (METHOD_TX_UART_DATA, METHOD_OUTPUT_CTRL):
                 logger.debug("gate %s: controller acked %s", gate, message.method)
+                if message.method == METHOD_OUTPUT_CTRL:
+                    await publish_gate_event(
+                        TYPE_BARRIER_OPENED,
+                        gate=gate,
+                        detail="controller acked the barrier command",
+                    )
             else:
                 logger.debug("gate %s: %s", gate, message.method)
 
@@ -239,7 +250,7 @@ class Orchestrator:
         lane.tickets_issued += 1
 
         self.bus.publish_raw(gate_status_topic(gate), signage(STATUS_THANKS))
-        self._open(gate)
+        await self._open(gate)
 
     async def _on_card(self, gate: str, message: Envelope) -> None:
         """An RFID tag was presented. Resolve it to a member and open the gate.
@@ -293,7 +304,7 @@ class Orchestrator:
                 card_no,
             )
             self.bus.publish_raw(gate_status_topic(gate), signage(STATUS_THANKS))
-            self._open(gate)
+            await self._open(gate)
             return
 
         lane.last_ticket_code = member.get("kode_tiket")
@@ -308,7 +319,7 @@ class Orchestrator:
             member.get("kode_tiket"),
         )
         self.bus.publish_raw(gate_status_topic(gate), signage(STATUS_THANKS))
-        self._open(gate)
+        await self._open(gate)
 
     async def _request_member_entry(
         self, gate: str, card_no: str, serial_no: str
@@ -513,7 +524,7 @@ class Orchestrator:
                 status,
             )
             # The device firmware opens on success_*; stand in for it here.
-            self._open(gate, exit_lane=True)
+            await self._open(gate, exit_lane=True)
             return
 
         logger.warning(
@@ -551,7 +562,7 @@ class Orchestrator:
 
     # -- barrier -----------------------------------------------------------
 
-    def _open(self, gate: str, *, exit_lane: bool = False) -> None:
+    async def _open(self, gate: str, *, exit_lane: bool = False) -> None:
         try:
             controller = self.registry.controller_for(gate)
         except RegistryError:
@@ -569,6 +580,9 @@ class Orchestrator:
             ),
         )
         logger.info("gate %s: barrier command sent (%s)", gate, topic)
+        await publish_gate_event(
+            TYPE_BARRIER_COMMAND, gate=gate, exit_lane=exit_lane, topic=topic
+        )
 
 
 def _as_int(value) -> int:

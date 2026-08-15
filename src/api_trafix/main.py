@@ -35,6 +35,7 @@ from api_trafix.routes import (
     operator_session,
     operator_shift_assignment,
     parking_rate,
+    pos,
     shift,
     subscription_plan,
     users,
@@ -179,6 +180,7 @@ app.include_router(signage.router)
 app.include_router(backup.router)
 app.include_router(audit_log.router)
 app.include_router(gate_cycle.router)
+app.include_router(pos.router)
 app.include_router(gates.router)
 app.include_router(devices.router)
 storage_dir = Path(get_settings().storage_dir)

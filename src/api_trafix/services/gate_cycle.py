@@ -45,6 +45,9 @@ from api_trafix.models import (
     ParkingRate,
     ParkingStatus,
     ParkTransaction,
+    Payment,
+    PaymentMethod,
+    PaymentStatus,
     RateStatus,
 )
 from api_trafix.services import escpos, rates
@@ -186,6 +189,22 @@ class GateOutResult:
             STATUS_SUCCESS_MEMBER,
             STATUS_SUCCESS_TICKET,
         )
+
+
+@dataclass
+class PosActionResult:
+    """The outcome of a POS action (void, reprint, receipt)."""
+
+    status: str
+    transaction_code: str | None = None
+    message: str | None = None
+    blocks_printed: int = 0
+    refunded: int = 0
+    total: int | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.status == STATUS_SUCCESS
 
 
 @dataclass
@@ -1006,6 +1025,8 @@ class GateCycleService:
         url_gambar: str | None = None,
         admin_id: int | None = None,
         shift_id: int | None = None,
+        exit_operator_id: UUID | None = None,
+        exit_shift_id: UUID | None = None,
         lost: bool = False,
         vehicle_id: int | None = None,
         open_barrier: bool = True,
@@ -1106,6 +1127,8 @@ class GateCycleService:
                     f"plate mismatch: entered {quote.plate_in}, "
                     f"exited {quote.plate_out}"
                 )
+            transaction.exit_operator_id = exit_operator_id or None
+            transaction.exit_shift_id = exit_shift_id or None
 
             self._log_event(
                 session,
@@ -1154,6 +1177,8 @@ class GateCycleService:
         vehicle_id: int | None,
         admin_id: int | None = None,
         shift_id: int | None = None,
+        exit_operator_id: UUID | None = None,
+        exit_shift_id: UUID | None = None,
         open_barrier: bool = True,
     ) -> GateOutResult:
         """Record a lost ticket without a ticket number.
@@ -1217,6 +1242,8 @@ class GateCycleService:
                 open_tx.status_parking = ParkingStatus.COMPLETED
                 open_tx.vehicle_type_id = await _coerce_vehicle(session, vehicle_id)
                 open_tx.keterangan = "tiket hilang"
+                open_tx.exit_operator_id = exit_operator_id or None
+                open_tx.exit_shift_id = exit_shift_id or None
                 code = open_tx.ticket_number or ""
             else:
                 code = await self.generate_transaction_code(session)
@@ -1239,6 +1266,8 @@ class GateCycleService:
                         payment_type="cash",
                         keterangan="tiket hilang",
                         detection_method=DetectionMethodForWire.MANUAL,
+                        exit_operator_id=exit_operator_id or None,
+                        exit_shift_id=exit_shift_id or None,
                     )
                 )
                 code = code or ""
@@ -1285,6 +1314,8 @@ class GateCycleService:
         vehicle_id: int,
         admin_id: int | None = None,
         shift_id: int | None = None,
+        exit_operator_id: UUID | None = None,
+        exit_shift_id: UUID | None = None,
         gate: str = "1",
         total: float | None = None,
     ) -> GateOutResult:
@@ -1341,6 +1372,8 @@ class GateCycleService:
                 payment_type="cash",
                 keterangan="tiket tidak cetak",
                 detection_method=DetectionMethodForWire.MANUAL,
+                exit_operator_id=exit_operator_id or None,
+                exit_shift_id=exit_shift_id or None,
             )
             session.add(transaction)
             await session.flush()
@@ -1379,6 +1412,245 @@ class GateCycleService:
             time_checkout=now_str,
         )
 
+    # -- POS actions (void / reprint / receipt) ------------------------------
+
+    async def void_transaction(
+        self,
+        *,
+        code: str,
+        operator_id: UUID | None = None,
+        shift_id: UUID | None = None,
+        reason: str = "",
+    ) -> PosActionResult:
+        """Cancel a transaction.
+
+        A still-parked session is voided outright; a paid/completed one is
+        voided and its ``payments`` rows marked ``Refunded`` (a cash refund row
+        is written when the transaction was marked lunas without one). Voided
+        transactions can never be settled or reprinted.
+        """
+        async with self.session_factory() as session:
+            transaction = await session.scalar(
+                select(ParkTransaction)
+                .where(ParkTransaction.ticket_number == code)
+                .order_by(ParkTransaction.created_at.desc())
+                .limit(1)
+            )
+            if transaction is None:
+                return PosActionResult(
+                    status=STATUS_NOT_FOUND,
+                    transaction_code=code,
+                    message="Transaction not found",
+                )
+            if transaction.status_parking == ParkingStatus.VOID:
+                return PosActionResult(
+                    status="already_void",
+                    transaction_code=code,
+                    message="Transaction is already void",
+                )
+
+            payments = (
+                (
+                    await session.execute(
+                        select(Payment).where(
+                            Payment.park_transaction_id == transaction.id,
+                            Payment.status != PaymentStatus.REFUNDED,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            refunded = 0
+            for payment in payments:
+                payment.status = PaymentStatus.REFUNDED
+                refunded += 1
+            if not payments and _is_paid(transaction):
+                session.add(
+                    Payment(
+                        park_transaction_id=transaction.id,
+                        amount=transaction.total_fee,
+                        method=PaymentMethod.CASH,
+                        status=PaymentStatus.REFUNDED,
+                        reference_number=transaction.ticket_number,
+                        paid_at=self.clock(),
+                    )
+                )
+                refunded += 1
+
+            gate_codes = await _gate_codes(session)
+            gate = gate_codes.get(transaction.exit_gate_id) or gate_codes.get(
+                transaction.entry_gate_id
+            )
+            stamp = self.clock()
+            reason_note = f"; reason={reason}" if reason else ""
+            transaction.status_parking = ParkingStatus.VOID
+            transaction.keterangan = (
+                f"{transaction.keterangan} | " if transaction.keterangan else ""
+            ) + f"voided by operator{reason_note}"
+            transaction.updated_at = stamp
+            self._log_event(
+                session,
+                source="pos",
+                method="void",
+                gate=gate,
+                transaction_code=code,
+                detail=f"operator={operator_id} shift={shift_id} refunded={refunded}{reason_note}",
+            )
+            await session.commit()
+            total = transaction.total_fee
+
+        log.info("voided transaction %s (refunded %s)", code, refunded)
+        return PosActionResult(
+            status=STATUS_SUCCESS,
+            transaction_code=code,
+            message="Transaction voided",
+            refunded=refunded,
+            total=total,
+        )
+
+    async def reprint_ticket(
+        self, *, code: str, gate: str | None = None
+    ) -> PosActionResult:
+        """Reprint the entry ticket from the transaction record.
+
+        The ESC/POS blocks are rebuilt from the stored facts (entry gate,
+        vehicle class, plate, entry time) and the ticket's QR is its own code,
+        exactly as on the original print. A voided ticket is not reprinted.
+        """
+        async with self.session_factory() as session:
+            transaction = await session.scalar(
+                select(ParkTransaction)
+                .where(ParkTransaction.ticket_number == code)
+                .order_by(ParkTransaction.created_at.desc())
+                .limit(1)
+            )
+            if transaction is None:
+                return PosActionResult(
+                    status=STATUS_NOT_FOUND,
+                    transaction_code=code,
+                    message="Transaction not found",
+                )
+            if transaction.status_parking == ParkingStatus.VOID:
+                return PosActionResult(
+                    status="already_void",
+                    transaction_code=code,
+                    message="Cannot reprint a voided ticket",
+                )
+
+            gate_codes = await _gate_codes(session)
+            gate_code = gate or gate_codes.get(transaction.entry_gate_id)
+            if gate_code is None:
+                return PosActionResult(
+                    status=STATUS_NOT_FOUND,
+                    transaction_code=code,
+                    message="Entry gate unknown — cannot reprint",
+                )
+
+            vehicle_wire_id = await vehicle_id_of(session, transaction.vehicle_type_id)
+            blocks_1, blocks_2 = await self._build_ticket(
+                session,
+                gate=gate_code,
+                transaction_code=transaction.ticket_number or code,
+                qr_string=transaction.ticket_number or code,
+                type_qr=escpos.TYPE_QR_CASH,
+                vehicle_id=vehicle_wire_id,
+                plate=transaction.police_number,
+                checkin_at=format_wib(transaction.entry_time) or "",
+            )
+            self._log_event(
+                session,
+                source="pos",
+                method="reprint",
+                gate=gate_code,
+                transaction_code=code,
+                detail="entry ticket reprinted",
+            )
+            await session.commit()
+
+        await self._publish_ticket(gate_code, code, blocks_1, blocks_2)
+        log.info("reprinted entry ticket %s on gate %s", code, gate_code)
+        return PosActionResult(
+            status=STATUS_SUCCESS,
+            transaction_code=code,
+            message="Entry ticket reprinted",
+            blocks_printed=len(blocks_1) + len(blocks_2),
+        )
+
+    async def print_exit_receipt(
+        self, *, code: str, gate: str | None = None
+    ) -> PosActionResult:
+        """Print the exit (payment) receipt from the transaction record."""
+        async with self.session_factory() as session:
+            transaction = await session.scalar(
+                select(ParkTransaction)
+                .where(ParkTransaction.ticket_number == code)
+                .order_by(ParkTransaction.created_at.desc())
+                .limit(1)
+            )
+            if transaction is None:
+                return PosActionResult(
+                    status=STATUS_NOT_FOUND,
+                    transaction_code=code,
+                    message="Transaction not found",
+                )
+            if transaction.status_parking == ParkingStatus.VOID:
+                return PosActionResult(
+                    status="already_void",
+                    transaction_code=code,
+                    message="Cannot print a receipt for a voided ticket",
+                )
+
+            gate_codes = await _gate_codes(session)
+            gate_code = (
+                gate
+                or gate_codes.get(transaction.exit_gate_id)
+                or gate_codes.get(transaction.entry_gate_id)
+            )
+            if gate_code is None:
+                return PosActionResult(
+                    status=STATUS_NOT_FOUND,
+                    transaction_code=code,
+                    message="Gate unknown — cannot print the receipt",
+                )
+
+            blocks = escpos.build_gate_out_receipt(
+                escpos.GateOutReceipt(
+                    store_name=self.config.site_name if self.config else "",
+                    trx=transaction.ticket_number or code,
+                    plate=transaction.police_number,
+                    datetime=format_wib(transaction.entry_time) or "",
+                    exit_datetime=format_wib(transaction.exit_time)
+                    or format_wib(self.clock())
+                    or "",
+                    duration=transaction.duration or "",
+                    total=float(transaction.total_fee or 0),
+                )
+            )
+            self._log_event(
+                session,
+                source="pos",
+                method="receipt",
+                gate=gate_code,
+                transaction_code=code,
+                detail="exit receipt printed",
+            )
+            await session.commit()
+
+        from api_trafix.services.protocol import message_id
+
+        async with self._print_lock(gate_code):
+            await self.publisher.print_ticket(
+                gate_code, blocks, message_id(code, 1)
+            )
+        log.info("printed exit receipt for %s on gate %s", code, gate_code)
+        return PosActionResult(
+            status=STATUS_SUCCESS,
+            transaction_code=code,
+            message="Exit receipt printed",
+            blocks_printed=len(blocks),
+        )
+
     # -- the automated RFID exit (PUT /api/lpr/gateoutcard) -----------------
 
     async def gate_out_rfid(
@@ -1390,6 +1662,8 @@ class GateCycleService:
         url_gambar: str | None,
         admin_id: int | None = None,
         shift_id: int | None = None,
+        exit_operator_id: UUID | None = None,
+        exit_shift_id: UUID | None = None,
     ) -> str:
         """Port of ``GateoutController::GateOutRfidLpr`` (:1603).
 
@@ -1421,6 +1695,8 @@ class GateCycleService:
                     url_gambar=url_gambar,
                     admin_id=admin_id,
                     shift_id=shift_id,
+                    exit_operator_id=exit_operator_id,
+                    exit_shift_id=exit_shift_id,
                 )
                 await session.commit()
                 return STATUS_SUCCESS_MEMBER
@@ -1461,6 +1737,8 @@ class GateCycleService:
                 url_gambar=url_gambar,
                 admin_id=admin_id,
                 shift_id=shift_id,
+                exit_operator_id=exit_operator_id,
+                exit_shift_id=exit_shift_id,
             )
             await session.commit()
             return STATUS_SUCCESS_TICKET
@@ -1475,6 +1753,8 @@ class GateCycleService:
         url_gambar: str | None,
         admin_id: int | None,
         shift_id: int | None,
+        exit_operator_id: UUID | None = None,
+        exit_shift_id: UUID | None = None,
     ) -> None:
         quote = await self._price(db, transaction, plate_out=plate_num)
 
@@ -1501,6 +1781,8 @@ class GateCycleService:
         plate = normalize_plate(plate_num)
         if plate:
             transaction.police_number = plate
+        transaction.exit_operator_id = exit_operator_id or None
+        transaction.exit_shift_id = exit_shift_id or None
 
         self._log_event(
             db,

@@ -103,3 +103,18 @@ async def db_engine():
 @pytest_asyncio.fixture(scope="session")
 async def db_sessionmaker(db_engine):
     return async_sessionmaker(db_engine, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _close_redis_after_each_test():
+    """Tear down the module-level Redis client per test.
+
+    ``api_trafix.config.redis.redis_client`` is a lazy singleton whose socket
+    is bound to the event loop that first used it. pytest-asyncio runs every
+    test on a fresh loop, so a client created in one test must be closed before
+    the next one starts, or awaits hit "Future attached to a different loop".
+    """
+    yield
+    from api_trafix.config.redis import close_redis
+
+    await close_redis()

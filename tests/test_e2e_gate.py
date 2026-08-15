@@ -455,7 +455,10 @@ def test_button_press_issues_a_ticket_and_opens_the_barrier(e2e_system):
 
     system.clear_lane()
     # Two print halves (QR + body) then the relay opening the barrier.
-    assert system.rig.count_new(marker, lambda m: m[0] == "/GATE/IN/1" and _is("txUartData")(m)) == 2
+    # ``wait_new`` polls, because the halves are published ~0.2s apart and an
+    # instantaneous ``count_new`` would race the second one.
+    system.rig.wait_new(marker, lambda m: m[0] == "/GATE/IN/1" and _is("txUartData")(m))
+    system.rig.wait_new(marker, lambda m: m[0] == "/GATE/IN/1" and _is("txUartData")(m))
     assert system.rig.wait_new(marker, lambda m: m[0] == "/GATE/IN/1" and _is("outputCtrl")(m))
     system.rig.wait_new(marker, lambda m: m[0] == "/GATE/IN/1/status" and "thanks" in m[1])
 

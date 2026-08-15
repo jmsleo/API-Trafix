@@ -1,0 +1,584 @@
+"""Tests for the operator POS router (``/api/pos/*``) and shift-before-login.
+
+Covers the P0/P1 gaps from PRD_GAP_ANALYSIS_OPERATOR_APP.md (payment method
+excluded): active-session enforcement, settle with session context, void
+(parked + paid/refund), reprint, exit receipt, and the SSE event stream.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+
+import httpx
+import pytest_asyncio
+from fastapi import FastAPI
+from sqlalchemy import select
+
+from api_trafix.config.database import get_db
+from api_trafix.config.redis import close_redis
+from api_trafix.core.security import create_access_token, hash_password
+from api_trafix.models import (
+    Gate,
+    OperatorSession,
+    OperatorShiftAssignment,
+    OperatorShiftAssignmentStatus,
+    ParkingStatus,
+    ParkTransaction,
+    Payment,
+    PaymentStatus,
+    Shift,
+    ShiftStatus,
+    User,
+    UserRole,
+    UserStatus,
+)
+from api_trafix.routes import auth as auth_routes
+from api_trafix.routes import gate_cycle as gate_routes
+from api_trafix.routes import pos as pos_routes
+from api_trafix.services.gate_cycle import WIB, GateCycleConfig, GateCycleService, NullPublisher
+from api_trafix.services.seed import seed_reference_data
+from api_trafix.services.snapshots import SnapshotStore
+
+
+def _suffix() -> str:
+    return uuid.uuid4().hex[:8]
+
+
+def _plate() -> str:
+    return f"H{uuid.uuid4().hex[:6].upper()}"
+
+
+@pytest_asyncio.fixture
+async def pos(db_sessionmaker, tmp_path):
+    async with db_sessionmaker() as db:
+        await seed_reference_data(db)
+
+    publisher = NullPublisher()
+    svc = GateCycleService(
+        db_sessionmaker,
+        publisher=publisher,
+        storage=SnapshotStore(Path(tmp_path)),
+        config=GateCycleConfig(
+            site_name="POS Test",
+            site_address="Jl. Test 1",
+            storage_dir=Path(tmp_path),
+        ),
+        print_gap_seconds=0,
+    )
+    app = FastAPI()
+    app.include_router(auth_routes.router)
+    app.include_router(gate_routes.router)
+    app.include_router(pos_routes.router)
+
+    async def override_get_db():
+        async with db_sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.state.gate_cycle = svc
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield SimpleNamespace(
+            client=client,
+            svc=svc,
+            publisher=publisher,
+            db=db_sessionmaker,
+        )
+    # The module-level Redis client is bound to this test's event loop.
+    await close_redis()
+
+
+async def _create_operator(db, *, role=UserRole.OPERATOR, suffix=None):
+    suffix = suffix or _suffix()
+    user = User(
+        name=f"POS {role.value} {suffix}",
+        username=f"pos-{role.value}-{suffix}",
+        password=hash_password("secret123"),
+        role=role,
+        status=UserStatus.ACTIVE,
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def _create_shift(db, name=None, *, status=ShiftStatus.ACTIVE):
+    """A shift whose window always contains the current WIB time."""
+    now = datetime.now(WIB)
+    start = (now - timedelta(hours=1)).time()
+    finish = (now + timedelta(hours=1)).time()
+    shift = Shift(
+        name=name or f"shift-{_suffix()}",
+        start_time=start,
+        finish_time=finish,
+        crosses_midnight=start >= finish,
+        status=status,
+    )
+    db.add(shift)
+    await db.commit()
+    await db.refresh(shift)
+    return shift
+
+
+async def _assign(db, operator, shift):
+    db.add(
+        OperatorShiftAssignment(
+            operator_id=operator.id,
+            shift_id=shift.id,
+            status=OperatorShiftAssignmentStatus.ACTIVE,
+        )
+    )
+    await db.commit()
+
+
+async def _gate(db, code="1") -> Gate:
+    gate = await db.scalar(select(Gate).where(Gate.gate_code == code))
+    assert gate is not None, f"gate {code} not seeded"
+    return gate
+
+
+async def _login(pos, operator, shift_id, gate_id):
+    return await pos.client.post(
+        "/auth/login",
+        json={
+            "username": operator.username,
+            "password": "secret123",
+            "shift_id": str(shift_id) if shift_id else None,
+            "gate_id": str(gate_id) if gate_id else None,
+        },
+    )
+
+
+async def _open_session(pos, *, gate_code="2", operator=None):
+    """Login an operator with a shift and return (token, session, operator)."""
+    async with pos.db() as db:
+        operator = operator or await _create_operator(db)
+        shift = await _create_shift(db)
+        await _assign(db, operator, shift)
+        gate = await _gate(db, gate_code)
+        gate_id, shift_id = gate.id, shift.id
+    resp = await _login(pos, operator, shift_id, gate_id)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["session"] is not None
+    return body["access_token"], body["session"], operator
+
+
+async def _enter(pos, *, gate="1", plate=None):
+    resp = await pos.client.post(
+        "/api/gatein",
+        json={
+            "gate": gate,
+            "vehicle_id": 1,
+            "plate_num": plate or _plate(),
+            "url_gambar": "",
+            "serialNo": "441D6491AF17",
+        },
+    )
+    assert resp.status_code == 200
+    return resp.json()["kode_tiket"]
+
+
+async def _backdate(db, code, hours=2):
+    """Push a transaction's entry time back so the flat fee kicks in."""
+    tx = await db.scalar(
+        select(ParkTransaction).where(ParkTransaction.ticket_number == code)
+    )
+    assert tx is not None
+    tx.entry_time = datetime.now(WIB) - timedelta(hours=hours)
+    await db.commit()
+
+
+# -- session enforcement ------------------------------------------------------
+
+
+async def test_settle_requires_an_active_session(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+    token, _ = create_access_token(str(operator.id), "operator")
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/settle",
+        json={"transaction_code": "0000000001"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+    assert "session" in resp.json()["detail"].lower()
+
+
+async def test_current_session_endpoint(pos):
+    token, session, _ = await _open_session(pos)
+    resp = await pos.client.get(
+        "/api/pos/session", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == session["id"]
+    assert body["status"] == "active"
+
+
+# -- shift-before-login -------------------------------------------------------
+
+
+async def test_login_without_shift_returns_no_session(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+    resp = await pos.client.post(
+        "/auth/login",
+        json={"username": operator.username, "password": "secret123"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["session"] is None
+
+
+async def test_login_requires_gate_id_when_shift_is_given(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift(db)
+        await _assign(db, operator, shift)
+        shift_id = shift.id
+    resp = await _login(pos, operator, shift_id, None)
+    assert resp.status_code == 400
+
+
+async def test_login_rejects_non_operator(pos):
+    async with pos.db() as db:
+        admin = await _create_operator(db, role=UserRole.ADMIN)
+        shift = await _create_shift(db)
+        gate = await _gate(db)
+        shift_id, gate_id = shift.id, gate.id
+    resp = await _login(pos, admin, shift_id, gate_id)
+    assert resp.status_code == 400
+
+
+async def test_login_rejects_unassigned_shift(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift(db)  # no assignment row
+        gate = await _gate(db)
+        shift_id, gate_id = shift.id, gate.id
+    resp = await _login(pos, operator, shift_id, gate_id)
+    assert resp.status_code == 403
+
+
+async def test_login_rejects_inactive_shift(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift(db, status=ShiftStatus.INACTIVE)
+        await _assign(db, operator, shift)
+        gate = await _gate(db)
+        shift_id, gate_id = shift.id, gate.id
+    resp = await _login(pos, operator, shift_id, gate_id)
+    assert resp.status_code == 404
+
+
+async def test_login_opens_session_for_assigned_operator(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift(db)
+        await _assign(db, operator, shift)
+        gate = await _gate(db)
+        shift_id, gate_id = shift.id, gate.id
+    resp = await _login(pos, operator, shift_id, gate_id)
+    assert resp.status_code == 200
+    session = resp.json()["session"]
+    assert session["status"] == "active"
+    assert session["shift_id"] == str(shift_id)
+    assert session["gate_id"] == str(gate_id)
+
+    async with pos.db() as db:
+        active = await db.scalar(
+            select(OperatorSession).where(OperatorSession.user_id == operator.id)
+        )
+        assert active is not None and active.status.value == "active"
+
+
+async def test_second_shift_login_conflicts(pos):
+    token, _, operator = await _open_session(pos)
+    async with pos.db() as db:
+        shift = await _create_shift(db)
+        await _assign(db, operator, shift)
+        gate = await _gate(db, "1")
+        shift_id, gate_id = shift.id, gate.id
+    resp = await _login(pos, operator, shift_id, gate_id)
+    assert resp.status_code == 409
+    assert token
+
+
+# -- settle with session context ----------------------------------------------
+
+
+async def test_quote_reads_an_open_session(pos):
+    token, _, _ = await _open_session(pos)
+    code = await _enter(pos)
+    resp = await pos.client.post(
+        "/api/pos/transactions/quote",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["data"]["transaction_code"] == code
+
+
+async def test_settle_uses_session_context(pos):
+    token, session, operator = await _open_session(pos)
+    code = await _enter(pos)
+    async with pos.db() as db:
+        await _backdate(db, code)
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/settle",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["data"]["transaction_code"] == code
+    assert body["data"]["total"] == 2000
+
+    async with pos.db() as db:
+        tx = await db.scalar(
+            select(ParkTransaction).where(ParkTransaction.ticket_number == code)
+        )
+        assert tx is not None
+        assert tx.status_parking == ParkingStatus.COMPLETED
+        assert str(tx.exit_operator_id) == str(operator.id)
+        assert str(tx.exit_shift_id) == session["shift_id"]
+
+
+async def test_settle_lost_ticket_with_session_context(pos):
+    token, session, operator = await _open_session(pos)
+    plate = _plate()
+    resp = await pos.client.post(
+        "/api/pos/transactions/settle",
+        json={"lost_ticket": True, "police_number": plate, "vehicle_id": 1},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    code = body["data"]["transaction_code"]
+
+    async with pos.db() as db:
+        tx = await db.scalar(
+            select(ParkTransaction).where(ParkTransaction.ticket_number == code)
+        )
+        assert tx is not None
+        assert tx.status_parking == ParkingStatus.COMPLETED
+        assert str(tx.exit_operator_id) == str(operator.id)
+        assert str(tx.exit_shift_id) == session["shift_id"]
+
+
+# -- void ---------------------------------------------------------------------
+
+
+async def test_void_a_parked_transaction(pos):
+    token, _, _ = await _open_session(pos)
+    code = await _enter(pos)
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/void",
+        json={"transaction_code": code, "reason": "wrong plate"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["refunded"] == 0
+
+    async with pos.db() as db:
+        tx = await db.scalar(
+            select(ParkTransaction).where(ParkTransaction.ticket_number == code)
+        )
+        assert tx.status_parking == ParkingStatus.VOID
+        assert "wrong plate" in (tx.keterangan or "")
+
+
+async def test_void_a_paid_transaction_refunds_and_is_idempotent(pos):
+    token, _, _ = await _open_session(pos)
+    code = await _enter(pos)
+    async with pos.db() as db:
+        await _backdate(db, code)
+    await pos.client.post(
+        "/api/pos/transactions/settle",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/void",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["refunded"] == 1
+
+    async with pos.db() as db:
+        tx = await db.scalar(
+            select(ParkTransaction).where(ParkTransaction.ticket_number == code)
+        )
+        assert tx.status_parking == ParkingStatus.VOID
+        payment = await db.scalar(
+            select(Payment).where(Payment.park_transaction_id == tx.id)
+        )
+        assert payment is not None
+        assert payment.status == PaymentStatus.REFUNDED
+        assert payment.amount == 2000
+
+    second = await pos.client.post(
+        "/api/pos/transactions/void",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert second.status_code == 409
+
+
+async def test_void_unknown_transaction_404s(pos):
+    token, _, _ = await _open_session(pos)
+    resp = await pos.client.post(
+        "/api/pos/transactions/void",
+        json={"transaction_code": "0000000000"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+# -- reprint / receipt --------------------------------------------------------
+
+
+async def test_reprint_publishes_four_blocks(pos):
+    token, _, _ = await _open_session(pos)
+    code = await _enter(pos)
+    before = len(pos.publisher.printed)
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/reprint",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["blocks_printed"] == 4
+    assert len(pos.publisher.printed) == before + 2
+
+
+async def test_exit_receipt_publishes_one_block(pos):
+    token, _, _ = await _open_session(pos)
+    code = await _enter(pos)
+    await pos.client.post(
+        "/api/pos/transactions/settle",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    before = len(pos.publisher.printed)
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/receipt",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["blocks_printed"] == 1
+    assert len(pos.publisher.printed) == before + 1
+
+
+# -- SSE event stream ---------------------------------------------------------
+
+
+class FakePubSub:
+    """A stand-in for ``redis.asyncio.Redis.pubsub()``.
+
+    ``get_message`` returns one event, then blocks forever — exactly how the
+    real pubsub behaves between messages.
+    """
+
+    def __init__(self, messages: list[dict]):
+        self._queue = list(messages)
+        self.unsubscribed = False
+
+    async def get_message(self, ignore_subscribe_messages=False, timeout=0.0):
+        if self._queue:
+            return {"data": json.dumps(self._queue.pop(0))}
+        await asyncio.Event().wait()
+
+    async def unsubscribe(self, *channels):
+        self.unsubscribed = True
+
+
+async def test_gate_events_iter_replays_snapshot_and_forwards(pos, monkeypatch):
+    from api_trafix.routes.pos import gate_events_iter
+
+    snapshot = [
+        {"type": "snapshot", "ts": "2026-08-14T00:00:00+00:00", "gate": "1"},
+    ]
+    pubsub = FakePubSub(
+        [
+            {"type": "barrier_opened", "gate": "1", "ts": "2026-08-14T00:00:01+00:00"},
+            {"type": "barrier_opened", "gate": "2", "ts": "2026-08-14T00:00:02+00:00"},
+        ]
+    )
+
+    async def _snapshot():
+        return snapshot
+
+    stream = gate_events_iter(
+        gate="1", snapshot=_snapshot, pubsub=pubsub, disconnect=lambda: False
+    )
+    snapshot_frame = await anext(stream)
+    event_frame = await anext(stream)
+    await stream.aclose()
+
+    assert "event: snapshot" in snapshot_frame
+    assert "event: barrier_opened" in event_frame
+    assert '"gate": "1"' in event_frame
+    # The gate-2 event would have been filtered out by the gate=1 filter.
+    assert pubsub.unsubscribed
+
+
+async def test_gate_events_iter_keepalive_when_redis_down(pos, monkeypatch):
+    from api_trafix.routes.pos import gate_events_iter
+
+    async def _empty_snapshot():
+        return []
+
+    stream = gate_events_iter(
+        gate=None, snapshot=_empty_snapshot, pubsub=None, disconnect=lambda: False
+    )
+    frame = await anext(stream)
+    await stream.aclose()
+
+    assert frame == ": keepalive\n\n"
+
+
+async def test_gate_events_iter_unsubscribes_on_exit(pos, monkeypatch):
+    from api_trafix.routes.pos import gate_events_iter
+
+    pubsub = FakePubSub([{"type": "barrier_opened", "gate": "1"}])
+
+    async def _snapshot():
+        return [{"type": "snapshot", "gate": "1"}]
+
+    def _stop():
+        return True  # disconnect on first check
+
+    frames = [
+        frame
+        async for frame in gate_events_iter(
+            gate=None, snapshot=_snapshot, pubsub=pubsub, disconnect=_stop
+        )
+    ]
+    assert any(f.startswith("event: snapshot") for f in frames)
+    assert pubsub.unsubscribed
+
+
+async def test_sse_stream_rejects_bad_token(pos):
+    async with pos.client.stream(
+        "GET", "/api/pos/events/stream?token=not-a-token"
+    ) as resp:
+        assert resp.status_code == 401

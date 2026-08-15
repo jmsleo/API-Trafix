@@ -3,14 +3,16 @@ from collections.abc import Callable
 
 import jwt
 import redis.exceptions
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api_trafix.config.database import get_db
 from api_trafix.config.redis import get_redis
 from api_trafix.core.security import ACCESS_TOKEN_TYPE, decode_token
-from api_trafix.models import User, UserRole
+from api_trafix.models import OperatorSession, OperatorSessionStatus, User, UserRole
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -43,8 +45,13 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    return await _resolve_token_user(credentials.credentials, db)
+
+
+async def _resolve_token_user(token: str, db: AsyncSession) -> User:
+    """Resolve a JWT access token to an active user, or raise 401/403."""
     try:
-        payload = decode_token(credentials.credentials)
+        payload = decode_token(token)
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -96,6 +103,20 @@ async def get_current_user(
     return user
 
 
+async def get_current_user_query(
+    token: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Authenticate from ``?token=`` — for EventSource, which cannot set headers."""
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing token query parameter",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await _resolve_token_user(token, db)
+
+
 def require_roles(*roles: UserRole) -> Callable:
     allowed = set(roles)
 
@@ -113,3 +134,32 @@ def require_roles(*roles: UserRole) -> Callable:
 get_current_admin = require_roles(UserRole.ADMIN)
 get_current_finance = require_roles(UserRole.FINANCE)
 get_current_operator = require_roles(UserRole.OPERATOR)
+
+
+async def get_active_operator_session(
+    current_user: User = Depends(get_current_operator),
+    db: AsyncSession = Depends(get_db),
+) -> OperatorSession:
+    """The operator's open ``operator_sessions`` row, or 403.
+
+    Every POS transaction is attributed to this session: the operator, shift
+    and gate are taken from it instead of being trusted from the request body.
+    """
+    session = await db.scalar(
+        select(OperatorSession)
+        .where(
+            OperatorSession.user_id == current_user.id,
+            OperatorSession.status == OperatorSessionStatus.ACTIVE,
+        )
+        .options(
+            selectinload(OperatorSession.user),
+            selectinload(OperatorSession.shift),
+            selectinload(OperatorSession.gate),
+        )
+    )
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No active operator session — start one before operating the gate",
+        )
+    return session
