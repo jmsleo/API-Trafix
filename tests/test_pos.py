@@ -1,8 +1,10 @@
-"""Tests for the operator POS router (``/api/pos/*``) and shift-before-login.
+"""Tests for the operator POS router (``/api/pos/*``) and session start.
 
 Covers the P0/P1 gaps from PRD_GAP_ANALYSIS_OPERATOR_APP.md (payment method
 excluded): active-session enforcement, settle with session context, void
 (parked + paid/refund), reprint, exit receipt, and the SSE event stream.
+Login is username/password only; operator sessions open via
+``POST /operator-sessions/start``.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from api_trafix.models import (
 )
 from api_trafix.routes import auth as auth_routes
 from api_trafix.routes import gate_cycle as gate_routes
+from api_trafix.routes import operator_session as operator_session_routes
 from api_trafix.routes import pos as pos_routes
 from api_trafix.services.gate_cycle import WIB, GateCycleConfig, GateCycleService, NullPublisher
 from api_trafix.services.seed import seed_reference_data
@@ -72,6 +75,7 @@ async def pos(db_sessionmaker, tmp_path):
     app = FastAPI()
     app.include_router(auth_routes.router)
     app.include_router(gate_routes.router)
+    app.include_router(operator_session_routes.router)
     app.include_router(pos_routes.router)
 
     async def override_get_db():
@@ -143,31 +147,35 @@ async def _gate(db, code="1") -> Gate:
     return gate
 
 
-async def _login(pos, operator, shift_id, gate_id):
+async def _login(pos, operator):
     return await pos.client.post(
         "/auth/login",
-        json={
-            "username": operator.username,
-            "password": "secret123",
-            "shift_id": str(shift_id) if shift_id else None,
-            "gate_id": str(gate_id) if gate_id else None,
-        },
+        json={"username": operator.username, "password": "secret123"},
+    )
+
+
+async def _start_session(pos, token, shift_id, gate_id):
+    return await pos.client.post(
+        "/operator-sessions/start",
+        json={"shift_id": str(shift_id), "gate_id": str(gate_id)},
+        headers={"Authorization": f"Bearer {token}"},
     )
 
 
 async def _open_session(pos, *, gate_code="2", operator=None):
-    """Login an operator with a shift and return (token, session, operator)."""
+    """Login an operator and start a session, returning (token, session, operator)."""
     async with pos.db() as db:
         operator = operator or await _create_operator(db)
         shift = await _create_shift(db)
         await _assign(db, operator, shift)
         gate = await _gate(db, gate_code)
         gate_id, shift_id = gate.id, shift.id
-    resp = await _login(pos, operator, shift_id, gate_id)
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["session"] is not None
-    return body["access_token"], body["session"], operator
+    login_resp = await _login(pos, operator)
+    assert login_resp.status_code == 200, login_resp.text
+    token = login_resp.json()["access_token"]
+    resp = await _start_session(pos, token, shift_id, gate_id)
+    assert resp.status_code == 201, resp.text
+    return token, resp.json(), operator
 
 
 async def _enter(pos, *, gate="1", plate=None):
@@ -223,10 +231,10 @@ async def test_current_session_endpoint(pos):
     assert body["status"] == "active"
 
 
-# -- shift-before-login -------------------------------------------------------
+# -- session start (POST /operator-sessions/start) -----------------------------
 
 
-async def test_login_without_shift_returns_no_session(pos):
+async def test_login_returns_no_session(pos):
     async with pos.db() as db:
         operator = await _create_operator(db)
     resp = await pos.client.post(
@@ -234,60 +242,55 @@ async def test_login_without_shift_returns_no_session(pos):
         json={"username": operator.username, "password": "secret123"},
     )
     assert resp.status_code == 200
-    assert resp.json()["session"] is None
+    assert "session" not in resp.json()
 
 
-async def test_login_requires_gate_id_when_shift_is_given(pos):
+async def test_session_start_requires_shift_and_gate(pos):
     async with pos.db() as db:
         operator = await _create_operator(db)
-        shift = await _create_shift(db)
-        await _assign(db, operator, shift)
-        shift_id = shift.id
-    resp = await _login(pos, operator, shift_id, None)
-    assert resp.status_code == 400
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await pos.client.post(
+        "/operator-sessions/start",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
 
 
-async def test_login_rejects_non_operator(pos):
+async def test_session_start_rejects_non_operator(pos):
     async with pos.db() as db:
         admin = await _create_operator(db, role=UserRole.ADMIN)
         shift = await _create_shift(db)
         gate = await _gate(db)
         shift_id, gate_id = shift.id, gate.id
-    resp = await _login(pos, admin, shift_id, gate_id)
-    assert resp.status_code == 400
-
-
-async def test_login_rejects_unassigned_shift(pos):
-    async with pos.db() as db:
-        operator = await _create_operator(db)
-        shift = await _create_shift(db)  # no assignment row
-        gate = await _gate(db)
-        shift_id, gate_id = shift.id, gate.id
-    resp = await _login(pos, operator, shift_id, gate_id)
+    login_resp = await _login(pos, admin)
+    token = login_resp.json()["access_token"]
+    resp = await _start_session(pos, token, shift_id, gate_id)
     assert resp.status_code == 403
 
 
-async def test_login_rejects_inactive_shift(pos):
+async def test_session_start_rejects_unknown_shift(pos):
     async with pos.db() as db:
         operator = await _create_operator(db)
-        shift = await _create_shift(db, status=ShiftStatus.INACTIVE)
-        await _assign(db, operator, shift)
         gate = await _gate(db)
-        shift_id, gate_id = shift.id, gate.id
-    resp = await _login(pos, operator, shift_id, gate_id)
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await _start_session(pos, token, uuid.uuid4(), gate.id)
     assert resp.status_code == 404
 
 
-async def test_login_opens_session_for_assigned_operator(pos):
+async def test_session_start_opens_session_for_operator(pos):
     async with pos.db() as db:
         operator = await _create_operator(db)
         shift = await _create_shift(db)
-        await _assign(db, operator, shift)
         gate = await _gate(db)
         shift_id, gate_id = shift.id, gate.id
-    resp = await _login(pos, operator, shift_id, gate_id)
-    assert resp.status_code == 200
-    session = resp.json()["session"]
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await _start_session(pos, token, shift_id, gate_id)
+    assert resp.status_code == 201
+    session = resp.json()
     assert session["status"] == "active"
     assert session["shift_id"] == str(shift_id)
     assert session["gate_id"] == str(gate_id)
@@ -299,14 +302,14 @@ async def test_login_opens_session_for_assigned_operator(pos):
         assert active is not None and active.status.value == "active"
 
 
-async def test_second_shift_login_conflicts(pos):
+async def test_second_session_start_conflicts(pos):
     token, _, operator = await _open_session(pos)
     async with pos.db() as db:
         shift = await _create_shift(db)
         await _assign(db, operator, shift)
         gate = await _gate(db, "1")
         shift_id, gate_id = shift.id, gate.id
-    resp = await _login(pos, operator, shift_id, gate_id)
+    resp = await _start_session(pos, token, shift_id, gate_id)
     assert resp.status_code == 409
     assert token
 

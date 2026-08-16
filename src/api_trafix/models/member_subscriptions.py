@@ -43,7 +43,7 @@ class MemberSubscription(Base):
     )
 
     # Relationships
-    member: Mapped["Member"] = relationship()
+    member: Mapped["Member"] = relationship(back_populates="subscriptions")
     plan: Mapped["SubscriptionPlan"] = relationship()
 
     def __repr__(self) -> str:

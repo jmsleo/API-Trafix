@@ -19,10 +19,10 @@ directly or via a thin wrapper.
 
 | PRD Module / Feature | PRD Requirement | Status | Detail |
 |---|---|---|---|
-| **Auth — Shift selection before login** | select available shift before login; show name/code/start/end; prevent closed shifts; retain shift through login | ✅ | `POST /auth/login` now accepts optional `shift_id` + `gate_id`. When given, the shift must be ACTIVE and open in its time window, the operator must have an active `operator_shift_assignment`, and the gate is required; the `operator_sessions` row is created in the same call and returned in `LoginResponse.session`. No existing active session is allowed (409). Plain operator login (no shift) is unchanged |
+| **Auth — Shift selection before login** | select available shift before login; show name/code/start/end; prevent closed shifts; retain shift through login | ⚠️ | `POST /auth/login` takes only `username` + `password` (no shift/gate). Shift selection moved to `POST /operator-sessions/start`, called after login with `shift_id` + `gate_id`; it opens the `operator_sessions` row (operator + shift + gate, status Active) that is the POS transaction context, and rejects an operator who already has an active session (409) |
 | **Auth — Login** | login page, validate username/password + account status, error on failure, block access on fail | ✅ | Login/refresh/logout/me work; inactive users blocked (403), lockout after repeated failures (`auth.py` + `dependencies`) |
-| **Auth — Validate shift status + gate permission** | validate selected shift is open; validate operator is permitted for the assigned gate | ✅ | `_shift_is_open` checks the shift window (WIB, `crosses_midnight` wrap); login rejects closed/inactive shifts and operators without an active assignment to the gate |
-| **Auth — Operator session after login** | create session after successful auth; store operator/gate/shift/start-time/status; active session is the transaction context | ✅ | Session auto-created at login when `shift_id` is provided (operator + gate + shift + status Active, audit-logged); the POS router resolves the active session per request |
+| **Auth — Validate shift status + gate permission** | validate selected shift is open; validate operator is permitted for the assigned gate | ⚠️ | `POST /operator-sessions/start` validates the shift and gate exist (404 otherwise) but no longer checks the shift's open window or the operator's `operator_shift_assignment`; those checks, which lived in the removed shift-before-login flow, are not enforced at session start |
+| **Auth — Operator session after login** | create session after successful auth; store operator/gate/shift/start-time/status; active session is the transaction context | ✅ | Session created by `POST /operator-sessions/start` (operator + gate + shift + status Active, audit-logged), not at login; the POS router resolves the active session per request |
 | **Auth — Block transactions without active session** | prevent transaction processing when there is no active operator session | ✅ | `get_active_operator_session` dependency (JWT operator + active `operator_sessions` row, else 403) guards every `/api/pos/transactions/*` endpoint; gate/operator/shift come from the session, not the body |
 | **Exit — Auto LPR** | accept plate from Camera LPR; find open entry by plate; auto-calc rate | ✅ | Exit LPR announcement (`gate/out/{gate}/pos`) → `_settle_by_plate` → `PUT /api/lpr/gateoutcard`; quote by plate (`/api/gateout/detailtransaction`) |
 | **Exit — Ticket scan** | read barcode ticket; validate; show transaction info | ✅ | `gateoutKasir` (transaction_code) + `detailtransaction` quote; ticket-used → `already_paid`, not-found → 404 |
@@ -45,7 +45,7 @@ directly or via a thin wrapper.
 3. **Reprint receipt** — ✅ `POST /api/pos/transactions/reprint`.
 
 ### P1 — POS workflow gaps
-4. **Shift selection before login** — ✅ shift-before-login at `POST /auth/login` (shift open + assignment + gate + 409 on existing session); session auto-created and returned.
+4. **Shift selection before login** — ✅ Login is username/password only; the operator picks the shift and opens the session via `POST /operator-sessions/start` (shift + gate + 409 on an existing active session).
 5. **Gate-opened status to the POS** — ✅ SSE stream `GET /api/pos/events/stream` (`services/events.py`, Redis pub/sub, `barrier_opened` published from the orchestrator ack handler).
 
 ### P2 — Detail
@@ -53,11 +53,11 @@ directly or via a thin wrapper.
 7. **Offline transaction queue** — ❌ Deferred. Design a device-side queue + reconciliation for network-down operation (MVP lists it).
 
 ## Present but OUT of PRD scope (extras — keep, don't delete)
-- `operator_shift_assignment` CRUD — covers the "operator permission for assigned gate" requirement partially; now validated in shift-before-login.
+- `operator_shift_assignment` CRUD — covers the "operator permission for assigned gate" requirement partially; the shift/gate validity checks that were part of shift-before-login are no longer enforced at session start.
 - Entry-side gate cycle (`gatein`, member auto-entry, orchestrator) — the Operator App PRD is Gate-Out only, but entry is the source of the sessions it settles.
 - `audit_log` writes on session start/end — already present, aligns with the back-office audit requirement.
 - RBAC on the admin modules — unchanged from the Admin & Teknisi scope.
 
 ## Summary
-- **Fully implemented:** login/auth, shift-before-login + auto session, active-session enforcement, ticket scan, member card, manual input, auto-LPR exit, auto rate calc, payment recording, barrier-open command + real-time status, exit receipt print, void + refund, reprint.
+- **Fully implemented:** login/auth, session start via `POST /operator-sessions/start`, active-session enforcement, ticket scan, member card, manual input, auto-LPR exit, auto rate calc, payment recording, barrier-open command + real-time status, exit receipt print, void + refund, reprint.
 - **Not implemented (deferred):** offline transaction flow.

@@ -80,11 +80,7 @@ class Settings(BaseSettings):
     )
 
     allowed_origins: list[str] = Field(
-        default=[
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "tauri://localhost",
-        ],
+        default=["*"],
         validation_alias="ALLOWED_ORIGINS",
     )
 

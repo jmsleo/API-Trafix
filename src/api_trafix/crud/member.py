@@ -10,6 +10,13 @@ from api_trafix.schemas.member import MemberCreate, MemberUpdate
 from api_trafix.utils.codes import generate_member_code
 
 
+def _with_children(stmt):
+    return stmt.options(
+        selectinload(Member.vehicles).selectinload(MemberVehicle.vehicle_type),
+        selectinload(Member.subscriptions),
+    )
+
+
 async def _unique_member_code(db: AsyncSession) -> str:
     for _ in range(10):
         code = generate_member_code()
@@ -25,9 +32,7 @@ async def get_all(
     page: int = 1,
     page_size: int = 10,
 ) -> tuple[list[Member], int]:
-    stmt = select(Member).options(
-        selectinload(Member.vehicles).selectinload(MemberVehicle.vehicle_type)
-    )
+    stmt = _with_children(select(Member))
     count_stmt = select(func.count()).select_from(Member)
 
     if search:
@@ -67,9 +72,7 @@ async def block(db: AsyncSession, db_obj: Member) -> Member:
 
 async def get_by_id(db: AsyncSession, member_id: uuid.UUID) -> Member | None:
     result = await db.execute(
-        select(Member)
-        .options(selectinload(Member.vehicles).selectinload(MemberVehicle.vehicle_type))
-        .where(Member.id == member_id)
+        _with_children(select(Member)).where(Member.id == member_id)
     )
     return result.scalar_one_or_none()
 

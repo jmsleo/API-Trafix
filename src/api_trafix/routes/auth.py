@@ -22,27 +22,15 @@ from api_trafix.core.security import (
     refresh_token_expire_seconds,
     verify_password,
 )
-from api_trafix.crud import operator_session as session_crud
-from api_trafix.crud import shift as shift_crud
-from api_trafix.models import (
-    OperatorShiftAssignment,
-    OperatorShiftAssignmentStatus,
-    Shift,
-    ShiftStatus,
-    User,
-    UserRole,
-)
+from api_trafix.models import User
 from api_trafix.schemas import (
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
     TokenPair,
 )
-from api_trafix.schemas.auth import LoginResponse
-from api_trafix.schemas.operator_session import OperatorSessionRead, OperatorSessionStart
 from api_trafix.schemas.user import UserRead
 from api_trafix.services.audit import log_action
-from api_trafix.services.gate_cycle import WIB
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -67,18 +55,6 @@ def _blacklist_key(jti: str) -> str:
     return f"blacklist:{jti}"
 
 
-def _shift_is_open(shift: Shift, now_utc: datetime) -> bool:
-    """Whether ``now`` falls inside a shift's start/finish window.
-
-    Shift times are site-local (WIB); ``crosses_midnight`` shifts span midnight,
-    so their window wraps (finish < start).
-    """
-    now_wib = now_utc.astimezone(WIB).time().replace(tzinfo=None)
-    if shift.crosses_midnight:
-        return now_wib >= shift.start_time or now_wib < shift.finish_time
-    return shift.start_time <= now_wib < shift.finish_time
-
-
 async def _store_refresh_jti(jti: str, user_id: str) -> None:
     r = await get_redis()
     await r.setex(_refresh_key(jti), refresh_token_expire_seconds(), user_id)
@@ -92,7 +68,7 @@ async def _consume_refresh_jti(jti: str) -> str | None:
     return value
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post("/login", response_model=TokenPair)
 async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends(get_db)):
     await enforce_login_throttle(request, data.username)
 
@@ -113,59 +89,7 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
 
     await clear_login_throttle(data.username)
     user.last_login = datetime.now(timezone.utc)
-
-    session = None
-    if data.shift_id is not None:
-        # PRD Operator App §3: the operator picks the shift before logging in
-        # and the session opens automatically with the shift + gate.
-        if user.role != UserRole.OPERATOR:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only operators start a shift at login",
-            )
-        if data.gate_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="gate_id is required when starting a shift at login",
-            )
-
-        shift = await shift_crud.get_by_id(db, data.shift_id)
-        if shift is None or shift.status != ShiftStatus.ACTIVE:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Shift not found or inactive",
-            )
-        if not _shift_is_open(shift, datetime.now(timezone.utc)):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Shift is not open right now",
-            )
-
-        assigned = await db.scalar(
-            select(OperatorShiftAssignment).where(
-                OperatorShiftAssignment.operator_id == user.id,
-                OperatorShiftAssignment.shift_id == data.shift_id,
-                OperatorShiftAssignment.status == OperatorShiftAssignmentStatus.ACTIVE,
-            )
-        )
-        if assigned is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Operator is not assigned to this shift",
-            )
-
-        existing = await session_crud.get_active_for_operator(db, user.id)
-        if existing is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Operator already has an active session",
-            )
-
-        session = await session_crud.start(
-            db, OperatorSessionStart(shift_id=data.shift_id, gate_id=data.gate_id), user
-        )
-    else:
-        await db.commit()
+    await db.commit()
 
     role = user.role.value
     access_token, _ = create_access_token(str(user.id), role)
@@ -176,10 +100,9 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
         db, "auth", "login", user.id, role, f"User '{data.username}' logged in",
     )
 
-    return LoginResponse(
+    return TokenPair(
         access_token=access_token,
         refresh_token=refresh_token,
-        session=OperatorSessionRead.model_validate(session) if session else None,
     )
 
 
