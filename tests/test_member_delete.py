@@ -21,7 +21,6 @@ from api_trafix.models.users import User, UserRole, UserStatus
 from api_trafix.models.vehicle_types import VehicleType
 from api_trafix.routes import member as member_routes
 from api_trafix.routes import member_subscription as member_subscription_routes
-from api_trafix.routes import member_vehicle as member_vehicle_routes
 from api_trafix.services.seed import seed_reference_data
 
 
@@ -56,7 +55,6 @@ async def client(db_sessionmaker, admin_user):
 
     app = FastAPI()
     app.include_router(member_routes.router)
-    app.include_router(member_vehicle_routes.router)
     app.include_router(member_subscription_routes.router)
 
     async def override_get_db():
@@ -84,8 +82,6 @@ async def _create_member(client) -> str:
 
 
 async def test_delete_member_cascades_owned_vehicles(client, db_sessionmaker):
-    member_id = await _create_member(client)
-
     async with db_sessionmaker() as db:
         vehicle_type = await db.scalar(
             select(VehicleType).where(VehicleType.code == "MOBIL")
@@ -94,14 +90,17 @@ async def test_delete_member_cascades_owned_vehicles(client, db_sessionmaker):
         vehicle_type_id = str(vehicle_type.id)
 
     resp = await client.post(
-        "/member-vehicles/",
+        "/members/",
         json={
-            "member_id": member_id,
-            "vehicle_type_id": vehicle_type_id,
+            "name": f"Member {_suffix()}",
+            "status": "active",
             "police_number": _plate(),
+            "vehicle_type_id": vehicle_type_id,
         },
     )
     assert resp.status_code == 201, resp.text
+    member_id = resp.json()["id"]
+    assert resp.json()["vehicles"][0]["police_number"] is not None
 
     resp = await client.delete(f"/members/{member_id}")
     assert resp.status_code == 204, resp.text

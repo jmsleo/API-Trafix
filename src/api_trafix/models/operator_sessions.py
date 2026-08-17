@@ -53,6 +53,6 @@ class OperatorSession(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    user = relationship("User", foreign_keys=[user_id])
+    user = relationship("User", foreign_keys=[user_id], back_populates="operator_sessions")
     shift = relationship("Shift", foreign_keys=[shift_id])
     gate = relationship("Gate", foreign_keys=[gate_id])

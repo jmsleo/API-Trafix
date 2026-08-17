@@ -23,24 +23,17 @@ from api_trafix.schemas.device import (
 from api_trafix.schemas.gate import GateBase, GateCreate, GatePage, GateRead, GateUpdate
 from api_trafix.schemas.member import (
     MemberBase,
+    MemberBrief,
     MemberCreate,
     MemberPage,
     MemberRead,
     MemberUpdate,
+    PlanBrief,
 )
 from api_trafix.schemas.member_subscription import (
     MemberSubscriptionCreate,
     MemberSubscriptionPage,
     MemberSubscriptionRead,
-    PlanBrief,
-)
-from api_trafix.schemas.member_vehicle import (
-    MemberBrief,
-    MemberVehicleCreate,
-    MemberVehiclePage,
-    MemberVehicleRead,
-    MemberVehicleUpdate,
-    VehicleTypeBrief,
 )
 from api_trafix.schemas.operator_session import (
     GateBrief,
@@ -164,10 +157,6 @@ __all__ = [
     "MemberSubscriptionPage",
     "MemberSubscriptionRead",
     "MemberUpdate",
-    "MemberVehicleCreate",
-    "MemberVehiclePage",
-    "MemberVehicleRead",
-    "MemberVehicleUpdate",
     "OperatorBrief",
     "OperatorSessionPage",
     "OperatorSessionRead",
@@ -238,7 +227,6 @@ __all__ = [
     "UserRead",
     "UserUpdate",
     "VehicleTypeBase",
-    "VehicleTypeBrief",
     "VehicleTypeCreate",
     "VehicleTypeRead",
     "VehicleTypeUpdate",

@@ -39,5 +39,5 @@ class OperatorShiftAssignment(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
-    operator = relationship("User", foreign_keys=[operator_id])
+    operator = relationship("User", foreign_keys=[operator_id], back_populates="operator_shift_assignments")
     shift = relationship("Shift", foreign_keys=[shift_id])

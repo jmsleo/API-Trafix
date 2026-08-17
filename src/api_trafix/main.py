@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import re
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -12,6 +14,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from api_trafix.config.database import async_session_maker, init_db
 from api_trafix.config.redis import close_redis
 from api_trafix.config.settings import get_settings
+from api_trafix.models import Backup, BackupStatus
+from sqlalchemy import update as sa_update
 from api_trafix.core.middleware import (
     RequestBodyLimitMiddleware,
     SecurityHeadersMiddleware,
@@ -19,10 +23,12 @@ from api_trafix.core.middleware import (
 from api_trafix.core.scheduler import run_periodic_tasks
 from api_trafix.services.device_registry import DeviceRegistry
 from api_trafix.services.gate_cycle import GateCycleConfig, GateCycleService, NullPublisher
+from api_trafix.services.lpr_plates import LprPlateBuffer
 from api_trafix.services.mqtt_bus import MqttBus
 from api_trafix.services.orchestrator import Orchestrator
 from api_trafix.services.publisher import MqttPublisher
 from api_trafix.services.seed import seed_reference_data
+from api_trafix.services.signage_publisher import SignagePublisher
 from api_trafix.services.snapshots import SnapshotStore
 from api_trafix.routes import (
     backup,
@@ -31,7 +37,6 @@ from api_trafix.routes import (
     gate_cycle,
     member,
     member_subscription,
-    member_vehicle,
     operator_session,
     operator_shift_assignment,
     parking_rate,
@@ -42,8 +47,11 @@ from api_trafix.routes import (
     vehicle_type,
 )
 from api_trafix.routes.auth import router as auth_router
-from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_vehicle, member_subscription, signage, backup, audit_log
+from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_subscription, signage, backup, audit_log
 from api_trafix.routes import devices, gates
+
+logging.basicConfig(level=logging.INFO)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -51,13 +59,29 @@ async def lifespan(app: FastAPI):
     async with async_session_maker() as db:
         await seed_reference_data(db)
 
+    # Reset any backups stuck in RUNNING from a previous crash/restart.
+    async with async_session_maker() as db:
+        await db.execute(
+            sa_update(Backup)
+            .where(Backup.status == BackupStatus.RUNNING)
+            .values(
+                status=BackupStatus.FAILED,
+                error_message="Process restarted while operation was in progress",
+            )
+        )
+        await db.commit()
+
     settings = get_settings()
     storage = SnapshotStore(Path(settings.storage_dir))
     registry = DeviceRegistry(async_session_maker)
     await registry.reload()
     app.state.device_registry = registry
+    app.state.snapshot_store = storage
+    plates = LprPlateBuffer()
+    app.state.lpr_plates = plates
 
     orchestrator: Orchestrator | None = None
+    signage_publisher: SignagePublisher | None = None
     if settings.mqtt_enabled:
         bus = MqttBus(
             host=settings.mqtt_host,
@@ -67,6 +91,22 @@ async def lifespan(app: FastAPI):
             client_id=settings.mqtt_client_id_prefix,
             keepalive=settings.mqtt_keepalive,
         )
+        mirrors: list[MqttBus] = []
+        for index, broker in enumerate(settings.signage_legacy_brokers):
+            mirror = MqttBus(
+                host=str(broker.get("host") or "127.0.0.1"),
+                port=int(broker.get("port") or 1883),
+                username=broker.get("username") or None,
+                password=broker.get("password") or None,
+                client_id=f"{settings.mqtt_client_id_prefix}-signage-mirror-{index}",
+                keepalive=settings.mqtt_keepalive,
+            )
+            await mirror.start()
+            mirrors.append(mirror)
+        signage_publisher = SignagePublisher(
+            bus, mirrors, base_url=settings.signage_public_base_url
+        )
+        app.state.signage_publisher = signage_publisher
         publisher = MqttPublisher(
             bus,
             registry,
@@ -74,6 +114,7 @@ async def lifespan(app: FastAPI):
             beep_ms=settings.barrier_beep_ms,
         )
     else:
+        app.state.signage_publisher = None
         publisher = NullPublisher()
 
     app.state.gate_cycle = GateCycleService(
@@ -94,16 +135,30 @@ async def lifespan(app: FastAPI):
             settings=settings,
             bus=bus,
             registry=registry,
+            plates=plates,
+            signage=signage_publisher,
         )
         await orchestrator.start()
 
-    background_task = asyncio.create_task(run_periodic_tasks())
+        if signage_publisher is not None:
+            # Push a full content sync once the brokers are up, so a display
+            # that just came online does not wait for the periodic sync.
+            await asyncio.gather(
+                *(candidate.wait_connected(15) for candidate in signage_publisher.buses)
+            )
+            async with async_session_maker() as db:
+                await signage_publisher.sync_from_db(db)
+
+    background_task = asyncio.create_task(run_periodic_tasks(signage=signage_publisher))
     yield
     background_task.cancel()
     with suppress(asyncio.CancelledError):
         await background_task
     if orchestrator is not None:
         await orchestrator.stop()
+    if signage_publisher is not None:
+        for mirror in signage_publisher.mirrors:
+            await mirror.stop()
     storage.shutdown()
     await close_redis()
 
@@ -174,7 +229,6 @@ app.include_router(finance_reports.router)
 app.include_router(operator_session.router)
 app.include_router(operator_shift_assignment.router)
 app.include_router(subscription_plan.router)
-app.include_router(member_vehicle.router)
 app.include_router(member_subscription.router)
 app.include_router(signage.router)
 app.include_router(backup.router)
@@ -205,3 +259,85 @@ async def health_check():
 @app.get("/healt", include_in_schema=False)
 async def health_check_legacy():
     return {"status": "healthy"}
+
+
+def _parse_multipart(body: bytes, content_type: str) -> list[dict[str, str]]:
+    """Split a ``multipart/form-data`` body into its parts.
+
+    The ECV86 camera uploads snapshots as raw multipart (``sn`` + ``bigFile``)
+    and ``python-multipart`` is not a dependency, so parse it directly.
+    """
+    match = re.search(r'boundary="?([^";]+)"?', content_type)
+    if not match:
+        return []
+    boundary = ("--" + match.group(1)).encode()
+    parts: list[dict[str, str]] = []
+    for raw in body.split(boundary):
+        if raw in (b"", b"--", b"\r\n"):
+            continue
+        raw = raw.lstrip(b"\r\n")
+        if raw.startswith(b"--"):
+            break
+        header_blob, _, content = raw.partition(b"\r\n\r\n")
+        headers: dict[str, str] = {}
+        for line in header_blob.decode("latin1").split("\r\n"):
+            key, _, value = line.partition(":")
+            headers[key.strip().lower()] = value.strip()
+        name = filename = None
+        for match_ in re.finditer(r'name="([^"]*)"|filename="([^"]*)"', headers.get("content-disposition", "")):
+            if match_.group(1) is not None:
+                name = match_.group(1)
+            if match_.group(2) is not None:
+                filename = match_.group(2)
+        parts.append(
+            {
+                "name": name or "",
+                "filename": filename or "",
+                "content_type": headers.get("content-type", ""),
+                "content": content.rstrip(b"\r\n"),
+            }
+        )
+    return parts
+
+
+@app.post("/api/lpr/camera/upload", include_in_schema=False)
+async def camera_upload(request: Request):
+    """Receive the ECV86 camera's pushed snapshot and attach it to the
+    buffered plate read for the gate-in lane."""
+    body = await request.body()
+    parts = _parse_multipart(body, request.headers.get("content-type", ""))
+    plates = request.app.state.lpr_plates
+    store: SnapshotStore = request.app.state.snapshot_store
+
+    saved = []
+    for part in parts:
+        if not part["filename"]:
+            continue
+        basename = part["filename"].rstrip("/").rsplit("/", 1)[-1]
+        relative = store.save_upload(
+            f"lpr/gatein/{SnapshotStore.lpr_filename(part['filename'])}",
+            part["content"],
+        )
+        gate = plates.attach_image(basename, relative)
+        saved.append(
+            {
+                "field": part["name"],
+                "basename": basename,
+                "bytes": len(part["content"]),
+                "gate": gate,
+                "path": relative,
+            }
+        )
+        print(
+            f"camera-upload field={part['name']} basename={basename} "
+            f"bytes={len(part['content'])} gate={gate} -> {relative}",
+            flush=True,
+        )
+
+    if not saved:
+        print(
+            f"camera-upload: no file parts (ct={request.headers.get('content-type')} "
+            f"len={len(body)})",
+            flush=True,
+        )
+    return JSONResponse({"status": "ok", "stored": saved})

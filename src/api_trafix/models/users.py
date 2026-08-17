@@ -43,5 +43,22 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
-    members = relationship("Member", back_populates="created_by_user", foreign_keys="Member.created_by")
-    audit_logs = relationship("AuditLog", back_populates="user")
+    members = relationship(
+        "Member",
+        back_populates="created_by_user",
+        foreign_keys="Member.created_by",
+        passive_deletes=True,
+    )
+    audit_logs = relationship(
+        "AuditLog", back_populates="user", passive_deletes=True
+    )
+    operator_sessions = relationship(
+        "OperatorSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    operator_shift_assignments = relationship(
+        "OperatorShiftAssignment",
+        back_populates="operator",
+        cascade="all, delete-orphan",
+    )

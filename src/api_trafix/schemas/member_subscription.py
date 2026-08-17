@@ -4,19 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from api_trafix.schemas.member_vehicle import MemberBrief
+from api_trafix.schemas.member import MemberBrief, PlanBrief
 
 SubscriptionStatus = Literal["active", "expired", "cancelled"]
-
-
-class PlanBrief(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    name: str
-    duration_in_days: int
-    price: int
-    is_active: bool
 
 
 class MemberSubscriptionCreate(BaseModel):

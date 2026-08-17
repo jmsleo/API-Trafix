@@ -33,7 +33,7 @@ bash scripts/curl-tests/01_auth.sh        # single suite
 | `03_reference.sh` | vehicle-types, shifts (incl. `crosses_midnight`), members + block |
 | `04_pricing.sh` | parking-rates, subscription-plans + status toggles |
 | `05_operator.sh` | operator-shift assignments, operator-session start/end + permission checks |
-| `06_member_relations.sh` | member-vehicles, member-subscriptions + cancel |
+| `06_member_relations.sh` | member create with vehicle/subscription, member-subscriptions + cancel |
 | `07_signage.sh` | signages, contents, assignments, schedules (full CRUD + status) |
 | `08_backups_audit.sh` | backup create/upload/download/restore/delete + audit-log filters/roles |
 | `09_finance.sh` | finance dashboard + reports, finance-role enforcement |

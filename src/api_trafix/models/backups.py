@@ -37,9 +37,9 @@ class Backup(Base):
         default=BackupStatus.COMPLETED,
     )
     error_message = Column(Text, nullable=True)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     last_restored_at = Column(DateTime(timezone=True), nullable=True)
-    last_restored_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    last_restored_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

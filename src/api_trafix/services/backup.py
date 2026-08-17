@@ -240,6 +240,7 @@ async def start_restore(db: AsyncSession, backup: Backup, user: User) -> Backup:
 
 async def _perform_restore(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
     async with _lock, async_session_maker() as db:
+        try:
             backup = await crud.get_by_id(db, backup_id)
             if backup is None:
                 return
@@ -270,96 +271,134 @@ async def _perform_restore(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
                     raise BackupError(f"Restore timed out after {timeout}s") from None
                 return proc.returncode, (stderr or stdout or b"")
 
-            try:
-                if backup.format == "custom":
-                    returncode, output = await _run(
-                        [
-                            "pg_restore",
-                            "--no-password",
-                            "--clean",
-                            "--if-exists",
-                            "--no-owner",
-                            "--no-privileges",
-                            f"--dbname={url}",
-                            str(path),
-                        ]
+            if backup.format == "custom":
+                returncode, output = await _run(
+                    [
+                        "pg_restore",
+                        "--no-password",
+                        "--clean",
+                        "--if-exists",
+                        "--no-owner",
+                        "--no-privileges",
+                        f"--dbname={url}",
+                        str(path),
+                    ]
+                )
+                if returncode != 0:
+                    raise BackupError(
+                        output.decode(errors="replace")[-2000:] or "pg_restore failed"
                     )
-                    if returncode != 0:
-                        raise BackupError(
-                            output.decode(errors="replace")[-2000:] or "pg_restore failed"
-                        )
-                else:
-                    returncode, output = await _run(
-                        [
-                            "psql",
-                            "--no-password",
-                            f"--dbname={url}",
-                            "-v",
-                            "ON_ERROR_STOP=1",
-                            "-q",
-                            "-c",
-                            "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
-                        ]
+            else:
+                returncode, output = await _run(
+                    [
+                        "psql",
+                        "--no-password",
+                        f"--dbname={url}",
+                        "-v",
+                        "ON_ERROR_STOP=1",
+                        "-q",
+                        "-c",
+                        "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
+                    ]
+                )
+                if returncode != 0:
+                    raise BackupError(
+                        output.decode(errors="replace")[-2000:]
+                        or "Failed to clear schema before restore"
                     )
-                    if returncode != 0:
-                        raise BackupError(
-                            output.decode(errors="replace")[-2000:]
-                            or "Failed to clear schema before restore"
-                        )
-                    returncode, output = await _run(
-                        [
-                            "psql",
-                            "--no-password",
-                            f"--dbname={url}",
-                            "-v",
-                            "ON_ERROR_STOP=1",
-                            "-q",
-                            "-f",
-                            str(path),
-                        ]
+                returncode, output = await _run(
+                    [
+                        "psql",
+                        "--no-password",
+                        f"--dbname={url}",
+                        "-v",
+                        "ON_ERROR_STOP=1",
+                        "-q",
+                        "-f",
+                        str(path),
+                    ]
+                )
+                if returncode != 0:
+                    raise BackupError(
+                        output.decode(errors="replace")[-2000:] or "psql restore failed"
                     )
-                    if returncode != 0:
-                        raise BackupError(
-                            output.decode(errors="replace")[-2000:] or "psql restore failed"
-                        )
-            except BackupError as exc:
+
+            # --- restore subprocess succeeded ---
+            now = datetime.now(UTC)
+            snap_id = backup.id
+            snap_filename = backup.filename
+            snap_user_role = user.role.value if user is not None else None
+
+            # Dispose the engine so stale connections from the old schema are
+            # discarded; the next session will get a fresh connection.
+            await engine.dispose()
+
+            # Use a fresh session for the post-restore update.
+            async with async_session_maker() as new_db:
+                await new_db.execute(
+                    update(Backup)
+                    .where(Backup.id == snap_id)
+                    .values(
+                        status=BackupStatus.COMPLETED,
+                        progress=100,
+                        error_message=None,
+                        last_restored_at=now,
+                        last_restored_by=user_id,
+                        updated_at=now,
+                    )
+                )
+                await new_db.commit()
+
+            await _flush_cache_and_sessions()
+
+            async with async_session_maker() as audit_db:
                 if user is not None:
                     await log_action(
-                        db, "backup", "restore", user.id, user.role.value,
+                        audit_db,
+                        "backup",
+                        "restore",
+                        user_id,
+                        snap_user_role,
+                        f"Restored DB from {snap_filename}",
+                    )
+
+        except BackupError as exc:
+            async with async_session_maker() as fail_db:
+                if user is not None:
+                    await log_action(
+                        fail_db,
+                        "backup",
+                        "restore",
+                        user.id,
+                        user.role.value,
                         f"Restore failed: {backup.filename}: {exc}",
                     )
-                backup.status = BackupStatus.FAILED
-                backup.error_message = str(exc)
-                backup.progress = 0
-                await db.commit()
-                return
-
-            now = datetime.now(UTC)
-            backup_id = backup.id
-            filename = backup.filename
-            user_role = user.role.value if user is not None else None
-
-            await engine.dispose()
-            await db.rollback()
-            await db.execute(
-                update(Backup)
-                .where(Backup.id == backup_id)
-                .values(
-                    status=BackupStatus.COMPLETED,
-                    progress=100,
-                    error_message=None,
-                    last_restored_at=now,
-                    last_restored_by=user_id,
-                    updated_at=now,
+                await fail_db.execute(
+                    update(Backup)
+                    .where(Backup.id == backup_id)
+                    .values(
+                        status=BackupStatus.FAILED,
+                        error_message=str(exc),
+                        progress=0,
+                    )
                 )
-            )
-            await db.commit()
-            await _flush_cache_and_sessions()
-            if user is not None:
-                await log_action(
-                    db, "backup", "restore", user_id, user_role,
-                    f"Restored DB from {filename}",
-                )
+                await fail_db.commit()
+
+        except Exception as exc:  # noqa: BLE001 - background task: any failure marks the restore FAILED
+            try:
+                async with async_session_maker() as fail_db:
+                    await fail_db.execute(
+                        update(Backup)
+                        .where(Backup.id == backup_id)
+                        .values(
+                            status=BackupStatus.FAILED,
+                            error_message=str(exc)[-2000:],
+                            progress=0,
+                        )
+                    )
+                    await fail_db.commit()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 async def delete_backup(db: AsyncSession, backup: Backup, user: User) -> None:

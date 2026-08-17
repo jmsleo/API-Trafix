@@ -5,7 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api_trafix.config.database import get_db
 from api_trafix.core.dependencies import get_current_admin
 from api_trafix.crud import member as crud
-from api_trafix.models import MemberStatus, User
+from api_trafix.crud import subscription_plan as plan_crud
+from api_trafix.crud import vehicle_type as vehicle_type_crud
+from api_trafix.models import MemberStatus, User, VehicleStatus
 from api_trafix.schemas.member import MemberCreate, MemberPage, MemberRead, MemberUpdate
 from api_trafix.services.audit import log_action
 
@@ -48,14 +50,54 @@ async def create_member(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin),
 ):
-    db_obj = await crud.create(db, payload)
+    if payload.vehicle_type_id is not None:
+        vehicle_type = await vehicle_type_crud.get_by_id(db, payload.vehicle_type_id)
+        if vehicle_type is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle type not found"
+            )
+        if vehicle_type.status != VehicleStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Vehicle type is not active",
+            )
+        if await crud.police_number_exists(db, payload.police_number):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Police number already registered",
+            )
+
+    plan = None
+    if payload.plan_id is not None:
+        plan = await plan_crud.get_by_id(db, payload.plan_id)
+        if plan is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Subscription plan not found",
+            )
+        if not plan.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Subscription plan is not active",
+            )
+        if payload.status != MemberStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Member is not active",
+            )
+
+    db_obj = await crud.create(db, payload, plan=plan)
     await log_action(
         db,
         module="member",
         action="create",
         user_id=current_user.id,
         role=current_user.role.value,
-        description=f"Registered member '{db_obj.name}' ({db_obj.member_code})",
+        description=(
+            f"Registered member '{db_obj.name}' ({db_obj.member_code})"
+            + (f" with vehicle '{payload.police_number}'" if payload.police_number else "")
+            + (f" subscribed to plan '{plan.name}'" if plan is not None else "")
+        ),
     )
     return db_obj
 

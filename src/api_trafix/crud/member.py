@@ -1,11 +1,14 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from api_trafix.models.member_subscriptions import MemberSubscription, STATUS_ACTIVE
 from api_trafix.models.member_vehicles import MemberVehicle
 from api_trafix.models.members import Member, MemberStatus
+from api_trafix.models.subscription_plans import SubscriptionPlan
 from api_trafix.schemas.member import MemberCreate, MemberUpdate
 from api_trafix.utils.codes import generate_member_code
 
@@ -13,7 +16,7 @@ from api_trafix.utils.codes import generate_member_code
 def _with_children(stmt):
     return stmt.options(
         selectinload(Member.vehicles).selectinload(MemberVehicle.vehicle_type),
-        selectinload(Member.subscriptions),
+        selectinload(Member.subscriptions).selectinload(MemberSubscription.plan),
     )
 
 
@@ -87,19 +90,57 @@ async def get_by_card_number(db: AsyncSession, card_number: str) -> Member | Non
     return result.scalar_one_or_none()
 
 
-async def create(db: AsyncSession, payload: MemberCreate) -> Member:
+async def create(
+    db: AsyncSession,
+    payload: MemberCreate,
+    plan: SubscriptionPlan | None = None,
+) -> Member:
+    member_data = payload.model_dump(exclude={"police_number", "vehicle_type_id", "plan_id"})
     for _ in range(5):
-        db_obj = Member(**payload.model_dump(), member_code=await _unique_member_code(db))
+        db_obj = Member(**member_data, member_code=await _unique_member_code(db))
         db.add(db_obj)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            continue
+        if payload.police_number is not None and payload.vehicle_type_id is not None:
+            db.add(
+                MemberVehicle(
+                    member_id=db_obj.id,
+                    vehicle_type_id=payload.vehicle_type_id,
+                    police_number=payload.police_number,
+                )
+            )
+        if plan is not None:
+            start_date = datetime.now(timezone.utc)
+            db.add(
+                MemberSubscription(
+                    member_id=db_obj.id,
+                    plan_id=plan.id,
+                    start_date=start_date,
+                    end_date=start_date + timedelta(days=plan.duration_in_days),
+                    status=STATUS_ACTIVE,
+                )
+            )
         try:
             await db.commit()
         except IntegrityError:
             await db.rollback()
-            continue
+            raise
         db_obj = await get_by_id(db, db_obj.id)
         assert db_obj is not None
         return db_obj
     raise IntegrityError("Could not generate a unique member code", None, None)
+
+
+async def police_number_exists(db: AsyncSession, police_number: str) -> bool:
+    result = await db.execute(
+        select(MemberVehicle.id)
+        .where(MemberVehicle.police_number == police_number)
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
 
 
 async def update(db: AsyncSession, db_obj: Member, payload: MemberUpdate) -> Member:
