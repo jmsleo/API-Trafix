@@ -41,4 +41,4 @@ class ParkingRate(Base):
         nullable=False,
     )
 
-    vehicle_type = relationship("VehicleType")
+    vehicle_type = relationship("VehicleType", back_populates="parking_rates")

@@ -44,7 +44,7 @@ class MemberSubscription(Base):
 
     # Relationships
     member: Mapped["Member"] = relationship(back_populates="subscriptions")
-    plan: Mapped["SubscriptionPlan"] = relationship()
+    plan: Mapped["SubscriptionPlan"] = relationship(back_populates="member_subscriptions")
 
     def __repr__(self) -> str:
         return f"<MemberSubscription id={self.id} status={self.status} end_date={self.end_date}>"

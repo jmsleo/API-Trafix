@@ -32,7 +32,7 @@ class ParkingSlot(Base):
     )
 
     # Relationships
-    vehicle_type: Mapped["VehicleType"] = relationship()
+    vehicle_type: Mapped["VehicleType"] = relationship(back_populates="parking_slots")
 
     def __repr__(self) -> str:
         return (

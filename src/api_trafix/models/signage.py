@@ -53,8 +53,8 @@ class Signage(Base):
         nullable=False,
     )
 
-    assignments = relationship("SignageAssignment", back_populates="signage")
-    schedules = relationship("SignageSchedule", back_populates="signage")
+    assignments = relationship("SignageAssignment", back_populates="signage", cascade="all, delete-orphan")
+    schedules = relationship("SignageSchedule", back_populates="signage", cascade="all, delete-orphan")
 
 
 class SignageContent(Base):
@@ -88,8 +88,8 @@ class SignageContent(Base):
         nullable=False,
     )
 
-    assignments = relationship("SignageAssignment", back_populates="content")
-    schedules = relationship("SignageSchedule", back_populates="content")
+    assignments = relationship("SignageAssignment", back_populates="content", cascade="all, delete-orphan")
+    schedules = relationship("SignageSchedule", back_populates="content", cascade="all, delete-orphan")
 
 
 class SignageAssignment(Base):

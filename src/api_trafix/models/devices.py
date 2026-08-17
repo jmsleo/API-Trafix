@@ -43,7 +43,7 @@ class Device(Base):
     )
 
     # Relationships
-    gate: Mapped["Gate"] = relationship()
+    gate: Mapped["Gate"] = relationship(back_populates="devices")
 
     def __repr__(self) -> str:
         return f"<Device id={self.id} name={self.name} status={self.status}>"

@@ -54,5 +54,5 @@ class OperatorSession(Base):
     )
 
     user = relationship("User", foreign_keys=[user_id], back_populates="operator_sessions")
-    shift = relationship("Shift", foreign_keys=[shift_id])
-    gate = relationship("Gate", foreign_keys=[gate_id])
+    shift = relationship("Shift", foreign_keys=[shift_id], back_populates="operator_sessions")
+    gate = relationship("Gate", foreign_keys=[gate_id], back_populates="operator_sessions")

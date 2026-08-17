@@ -38,7 +38,7 @@ class ParkTransaction(Base):
         UUID(as_uuid=True), ForeignKey("vehicle_types.id"), nullable=False
     )
     member_vehicle_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("member_vehicles.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("member_vehicles.id", ondelete="SET NULL"), nullable=True
     )
 
     entry_time: Mapped[datetime] = mapped_column(
@@ -52,14 +52,14 @@ class ParkTransaction(Base):
         UUID(as_uuid=True), ForeignKey("gates.id"), nullable=False
     )
     exit_gate_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("gates.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("gates.id", ondelete="SET NULL"), nullable=True
     )
 
     entry_shift_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("shifts.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("shifts.id", ondelete="SET NULL"), nullable=True
     )
     exit_shift_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("shifts.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("shifts.id", ondelete="SET NULL"), nullable=True
     )
 
     entry_operator_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -70,7 +70,7 @@ class ParkTransaction(Base):
     )
 
     parking_rate_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("parking_rates.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("parking_rates.id", ondelete="SET NULL"), nullable=True
     )
 
     status_parking: Mapped[ParkingStatus] = mapped_column(
@@ -118,4 +118,4 @@ class ParkTransaction(Base):
     )
 
     # Relationship internal (tabel 14-16)
-    payments: Mapped[list["Payment"]] = relationship(back_populates="park_transaction")
+    payments: Mapped[list["Payment"]] = relationship(back_populates="park_transaction", cascade="all, delete-orphan")

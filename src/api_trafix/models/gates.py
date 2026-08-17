@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, Enum, String
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from api_trafix.config.database import Base
 
@@ -36,3 +37,8 @@ class Gate(Base):
     )
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    devices = relationship("Device", back_populates="gate", cascade="all, delete-orphan")
+    operator_sessions = relationship(
+        "OperatorSession", back_populates="gate", cascade="all, delete-orphan"
+    )

@@ -35,7 +35,7 @@ class MemberVehicle(Base):
 
     # Relationships
     member: Mapped["Member"] = relationship(back_populates="vehicles")
-    vehicle_type: Mapped["VehicleType"] = relationship()
+    vehicle_type: Mapped["VehicleType"] = relationship(back_populates="member_vehicles")
 
     def __repr__(self) -> str:
         return f"<MemberVehicle id={self.id} police_number={self.police_number}>"
