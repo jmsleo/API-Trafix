@@ -521,11 +521,16 @@ class GateCycleService:
             # slow camera must never hold the barrier shut.
             image_path = "-"
             if url_gambar and self.storage is not None:
-                image_path = self.storage.download_async(
-                    url_gambar,
-                    "lpr/gatein",
-                    self.storage.lpr_filename(url_gambar),
-                )
+                if url_gambar.startswith("storage/"):
+                    # The push-style camera uploaded the image straight to us;
+                    # it is already on disk under the /storage mount.
+                    image_path = url_gambar
+                else:
+                    image_path = self.storage.download_async(
+                        url_gambar,
+                        "lpr/gatein",
+                        self.storage.lpr_filename(url_gambar),
+                    )
             elif url_gambar:
                 image_path = url_gambar
 

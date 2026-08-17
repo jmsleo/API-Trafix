@@ -1,0 +1,17 @@
+[Unit]
+Description=BSS Parking Signage Display
+After=network.target graphical.target
+
+[Service]
+Type=simple
+User=pi
+Environment=DISPLAY=:0
+ExecStartPre=/usr/bin/xset s off
+ExecStartPre=/usr/bin/xset s noblank
+ExecStartPre=/usr/bin/xset -dpms
+ExecStart=/home/pi/signage-display/start.sh 1 http://192.168.1.13:8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=graphical.target

@@ -40,8 +40,15 @@ from api_trafix.services.device_registry import DeviceRegistry, RegistryError
 from api_trafix.services.events import (
     TYPE_BARRIER_COMMAND,
     TYPE_BARRIER_OPENED,
+    TYPE_GATE_HEARTBEAT,
+    TYPE_GATE_OFFLINE,
+    TYPE_GATE_ONLINE,
+    TYPE_SENSOR_CHANGE,
     publish_gate_event,
+    publish_system_event,
 )
+from api_trafix.services.gate_health import GateHealth
+from api_trafix.services.lpr_plates import LprPlateBuffer
 from api_trafix.services.protocol import (
     INPUT_ARRIVAL_LOOP,
     INPUT_PASS_LOOP,
@@ -49,6 +56,7 @@ from api_trafix.services.protocol import (
     METHOD_INPUT_INFO,
     METHOD_OUTPUT_CTRL,
     METHOD_READ_CARD,
+    METHOD_STATUS,
     METHOD_TX_UART_DATA,
     STATUS_THANKS,
     STATUS_WELCOME,
@@ -66,6 +74,12 @@ logger = logging.getLogger(__name__)
 
 # The plate the LPR reports when it saw nothing. 4 of 6 tickets on site.
 NO_PLATE = ""
+
+
+def _basename(path: str) -> str:
+    """The trailing filename of a camera picture path, used to match the
+    pushed snapshot to its plate read."""
+    return path.rstrip("/").rsplit("/", 1)[-1]
 
 # Sent by ``_request_member_entry`` when the card belongs to a registered member
 # whose entry was refused (expired subscription or vehicle-class mismatch) —
@@ -92,10 +106,18 @@ class Orchestrator:
         registry: DeviceRegistry,
         vehicle_id: int = 1,
         rfid_only: bool = False,
+        plates: LprPlateBuffer | None = None,
+        signage: Any = None,
+        gate_health: GateHealth | None = None,
+        tcp_gateway: Any = None,
+        signage_display: Any = None,
     ) -> None:
         self.settings = settings
         self.bus = bus
         self.registry = registry
+        # Mirrors signage status to the display's own brokers (see
+        # SignagePublisher); falls back to the plain status topic when absent.
+        self.signage = signage
         # The gate hardware cannot tell a car from a motorcycle. On a
         # single-class site this is fixed; a mixed site needs either a
         # per-lane setting or an operator button.
@@ -103,6 +125,15 @@ class Orchestrator:
         # On-site live testing mode: react to nothing but readCard so we never
         # issue a second ticket for a real car or the ticket button.
         self.rfid_only = rfid_only
+        # Push-style LPR reads land here (camera MQTT announcements); the HTTP
+        # snapshot upload endpoint attaches the image to the same entry.
+        self.plates = plates or LprPlateBuffer()
+        # Per-gate health monitoring (heartbeat/sensor tracking).
+        self.gate_health = gate_health or GateHealth()
+        # TCP gateway for controllers that speak raw TCP.
+        self.tcp_gateway = tcp_gateway
+        # Signage display service for web-based displays.
+        self._signage_display = signage_display
 
         self.http = httpx.AsyncClient(timeout=settings.lpr_timeout_seconds)
         self.lanes: dict[str, LaneState] = {}
@@ -131,6 +162,24 @@ class Orchestrator:
                 gate_out_pos_topic(lpr.pos_topic_gate),
                 gate,
             )
+
+        # A push-style entry LPR (ECV86 camera) announces plate reads on MQTT;
+        # buffer them so the ticket button can print the plate.
+        for gate in self.registry.entry_gate_codes():
+            try:
+                lpr = self.registry.lpr_for(gate)
+            except RegistryError:
+                continue
+            if lpr.update_topic:
+                self.bus.subscribe_raw(
+                    lpr.update_topic, self._make_camera_handler(gate)
+                )
+                logger.info(
+                    "buffering entry LPR %s reads on %s (gate %s)",
+                    lpr.name,
+                    lpr.update_topic,
+                    gate,
+                )
 
         await self.bus.start()
         await self._check_dependencies()
@@ -181,6 +230,8 @@ class Orchestrator:
             elif message.method == METHOD_READ_CARD:
                 async with self._locks[gate]:
                     await self._on_card(gate, message)
+            elif message.method == METHOD_STATUS:
+                await self._on_status(gate, message)
             elif message.method in (METHOD_TX_UART_DATA, METHOD_OUTPUT_CTRL):
                 logger.debug("gate %s: controller acked %s", gate, message.method)
                 if message.method == METHOD_OUTPUT_CTRL:
@@ -194,6 +245,17 @@ class Orchestrator:
 
         return handler
 
+    def _signage_status(self, gate: str, status: str) -> None:
+        """Drive the display: legacy ``/GATE/IN/N/status`` plus ``gate/text``."""
+        if self.signage is not None:
+            self.signage.publish_gate_status(gate, status)
+        else:
+            self.bus.publish_raw(gate_status_topic(gate), signage(status))
+
+        # Also publish to signage display service for web-based displays
+        if hasattr(self, '_signage_display') and self._signage_display:
+            asyncio.create_task(self._signage_display.update_status(gate, status))
+
     async def _on_inputs(self, gate: str, message: Envelope) -> None:
         lane = self.lanes[gate]
         arrival = _as_int(message.get(INPUT_ARRIVAL_LOOP))
@@ -203,7 +265,7 @@ class Orchestrator:
         if arrival and not lane.occupied:
             lane.occupied = True
             logger.info("gate %s: vehicle arrived", gate)
-            self.bus.publish_raw(gate_status_topic(gate), signage(STATUS_WELCOME))
+            self._signage_status(gate, STATUS_WELCOME)
 
         if button:
             await self._handle_button(gate, message)
@@ -212,6 +274,37 @@ class Orchestrator:
             if lane.occupied:
                 logger.info("gate %s: vehicle cleared the lane", gate)
             lane.occupied = False
+
+        # Update per-gate health with sensor states
+        self.gate_health.on_input(gate, message.data)
+
+    async def _on_status(self, gate: str, message: Envelope) -> None:
+        """Controller status report (heartbeat). Update gate health."""
+        data = message.data or {}
+        was_online = self.gate_health.get_one(gate)
+        prev_online = was_online["is_online"] if was_online else False
+
+        self.gate_health.on_heartbeat(gate, data)
+
+        # Publish heartbeat event
+        await publish_system_event(
+            TYPE_GATE_HEARTBEAT,
+            gate=gate,
+            inputs={k: v for k, v in data.items() if k.startswith("input")},
+            relays={k: v for k, v in data.items() if k.startswith("relay")},
+        )
+
+        # Publish online/offline transition events
+        if not prev_online:
+            await publish_system_event(TYPE_GATE_ONLINE, gate=gate)
+            logger.info("gate %s: now ONLINE", gate)
+
+        logger.debug(
+            "gate %s: status — inputs=%s relays=%s",
+            gate,
+            {k: v for k, v in data.items() if k.startswith("input")},
+            {k: v for k, v in data.items() if k.startswith("relay")},
+        )
 
     async def _handle_button(self, gate: str, message: Envelope) -> None:
         lane = self.lanes[gate]
@@ -242,14 +335,14 @@ class Orchestrator:
             # The API failed. Do not open: without a ticket the driver has no
             # way to check out, and an unrecorded car is worse than a delay.
             logger.error("gate %s: no ticket issued, barrier stays shut", gate)
-            self.bus.publish_raw(gate_status_topic(gate), signage(STATUS_THANKS))
+            self._signage_status(gate, STATUS_THANKS)
             return
 
         lane.last_ticket_code = ticket
         lane.last_ticket_at = now
         lane.tickets_issued += 1
 
-        self.bus.publish_raw(gate_status_topic(gate), signage(STATUS_THANKS))
+        self._signage_status(gate, STATUS_THANKS)
         await self._open(gate)
 
     async def _on_card(self, gate: str, message: Envelope) -> None:
@@ -303,7 +396,7 @@ class Orchestrator:
                 gate,
                 card_no,
             )
-            self.bus.publish_raw(gate_status_topic(gate), signage(STATUS_THANKS))
+            self._signage_status(gate, STATUS_THANKS)
             await self._open(gate)
             return
 
@@ -318,7 +411,7 @@ class Orchestrator:
             card_no,
             member.get("kode_tiket"),
         )
-        self.bus.publish_raw(gate_status_topic(gate), signage(STATUS_THANKS))
+        self._signage_status(gate, STATUS_THANKS)
         await self._open(gate)
 
     async def _request_member_entry(
@@ -368,6 +461,37 @@ class Orchestrator:
         logger.info("gate %s: member entry accepted for card %s", gate, card_no)
         return payload
 
+    # -- entry LPR (push-style camera) -------------------------------------
+
+    def _make_camera_handler(self, gate: str):
+        async def handler(_topic: str, payload: str) -> None:
+            try:
+                data = json.loads(payload)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "gate %s: undecodable camera announcement: %r", gate, payload
+                )
+                return
+            if data.get("cmd") != "result":
+                return
+            plate = str(data.get("plate_num") or "").strip()
+            if not plate:
+                logger.debug("gate %s: camera result without a plate", gate)
+                return
+            basenames = [
+                _basename(str(data.get("full_pic_path") or "")),
+                _basename(str(data.get("plate_pic_path") or "")),
+            ]
+            self.plates.set_plate(gate, plate, *basenames)
+            logger.info(
+                "gate %s: camera read %s (%s)",
+                gate,
+                plate,
+                data.get("utc_ts") or data.get("local_time") or "?",
+            )
+
+        return handler
+
     async def _read_plate(self, gate: str) -> tuple[str, str]:
         """Ask the entry LPR what it can see.
 
@@ -382,10 +506,7 @@ class Orchestrator:
             return NO_PLATE, ""
 
         if not lpr.serves_http:
-            logger.warning(
-                "gate %s: LPR serves no HTTP, issuing a ticket with no plate", gate
-            )
-            return NO_PLATE, ""
+            return await self._read_buffered_plate(gate)
 
         attempts = max(1, self.settings.lpr_retries + 1)
         for attempt in range(1, attempts + 1):
@@ -413,6 +534,33 @@ class Orchestrator:
 
         logger.error(
             "gate %s: LPR unreachable, issuing a ticket with no plate", gate
+        )
+        return NO_PLATE, ""
+
+    async def _read_buffered_plate(self, gate: str) -> tuple[str, str]:
+        """Wait briefly for a plate the push-style camera announced.
+
+        The camera reads the plate as the car approaches the barrier, so it is
+        usually buffered by the time the driver presses the button. The wait is
+        a safety margin, not a polling loop: without a read we print a ticket
+        with no plate rather than strand the driver.
+        """
+        deadline = asyncio.get_running_loop().time() + self.settings.lpr_plate_wait_seconds
+        while True:
+            plate, image_url = self.plates.take_plate(
+                gate, max_age=self.settings.lpr_plate_max_age_seconds
+            )
+            if plate:
+                logger.info("gate %s: plate %s (from camera buffer)", gate, plate)
+                return plate, image_url
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(0.25, remaining))
+        logger.warning(
+            "gate %s: no camera plate within %.1fs, issuing a ticket with no plate",
+            gate,
+            self.settings.lpr_plate_wait_seconds,
         )
         return NO_PLATE, ""
 
@@ -570,6 +718,8 @@ class Orchestrator:
                 "gate %s: no controller configured, barrier stays shut", gate
             )
             return
+
+        # Send MQTT command
         topic = gate_out_topic(gate) if exit_lane else gate_in_topic(gate)
         self.bus.publish(
             topic,
@@ -579,7 +729,20 @@ class Orchestrator:
                 beep_ms=self.settings.barrier_beep_ms,
             ),
         )
-        logger.info("gate %s: barrier command sent (%s)", gate, topic)
+        logger.info("gate %s: MQTT barrier command sent (%s)", gate, topic)
+
+        # Also send TCP command if gateway is connected for this gate
+        if (
+            self.tcp_gateway is not None
+            and controller.connection_type in ("tcp", "both")
+        ):
+            ok = await self.tcp_gateway.send_output_ctrl(
+                gate,
+                output_id="relay1",
+                pulse_ms=self.settings.barrier_pulse_ms,
+            )
+            if ok:
+                logger.info("gate %s: TCP barrier command sent", gate)
         await publish_gate_event(
             TYPE_BARRIER_COMMAND, gate=gate, exit_lane=exit_lane, topic=topic
         )

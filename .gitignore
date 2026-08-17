@@ -6,3 +6,6 @@ __pycache__/
 graphify-out/
 backups/
 .opencode
+# Runtime directories
+media/
+storage/

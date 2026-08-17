@@ -1,0 +1,14 @@
+[Unit]
+Description=BSS Parking GPIO Bridge
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/gpio-bridge
+ExecStart=/usr/bin/python3 /opt/gpio-bridge/gpio_bridge.py --config /opt/gpio-bridge/config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

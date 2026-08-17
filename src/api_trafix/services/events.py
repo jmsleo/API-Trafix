@@ -21,12 +21,22 @@ from api_trafix.config.redis import get_redis
 log = logging.getLogger(__name__)
 
 GATE_EVENTS_CHANNEL = "gate:events"
+SYSTEM_EVENTS_CHANNEL = "system:events"
 
-# Event ``type`` values.
+# Event ``type`` values — gate cycle.
 TYPE_BARRIER_COMMAND = "barrier_command"
 TYPE_BARRIER_OPENED = "barrier_opened"
 TYPE_TRANSACTION_SETTLED = "transaction_settled"
 TYPE_TRANSACTION_VOIDED = "transaction_voided"
+
+# Event ``type`` values — system health.
+TYPE_MQTT_CONNECTED = "mqtt_connected"
+TYPE_MQTT_DISCONNECTED = "mqtt_disconnected"
+TYPE_GATE_HEARTBEAT = "gate_heartbeat"
+TYPE_GATE_ONLINE = "gate_online"
+TYPE_GATE_OFFLINE = "gate_offline"
+TYPE_SENSOR_CHANGE = "sensor_change"
+TYPE_LANE_STALL = "lane_stall"
 
 
 async def publish_gate_event(
@@ -55,3 +65,28 @@ async def publish_gate_event(
         await r.publish(GATE_EVENTS_CHANNEL, json.dumps(event, default=str))
     except (redis.exceptions.RedisError, OSError) as exc:
         log.warning("could not publish gate event %s: %s", type, exc)
+
+
+async def publish_system_event(
+    type: str,
+    *,
+    gate: str | None = None,
+    **extra: Any,
+) -> None:
+    """Publish one event onto ``SYSTEM_EVENTS_CHANNEL``.
+
+    System events track MQTT status, gate online/offline transitions,
+    heartbeat activity, and sensor changes. Best-effort like gate events.
+    """
+    event: dict[str, Any] = {
+        "type": type,
+        "ts": datetime.now(UTC).isoformat(),
+    }
+    if gate is not None:
+        event["gate"] = gate
+    event.update(extra)
+    try:
+        r = await get_redis()
+        await r.publish(SYSTEM_EVENTS_CHANNEL, json.dumps(event, default=str))
+    except (redis.exceptions.RedisError, OSError) as exc:
+        log.warning("could not publish system event %s: %s", type, exc)

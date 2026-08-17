@@ -52,6 +52,8 @@ class GateController:
     host: str
     serial_no: str
     gate_type: str
+    connection_type: str = "mqtt"  # "mqtt" | "tcp" | "both"
+    tcp_port: int = 5000
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,10 @@ class LprDevice:
     # (.149) publishes with "1" while the exit lane is logically gate "2"
     # (flow.md §8). Defaults to the logical gate.
     pos_topic_gate: str
+    # MQTT topic the device announces reads on (push-style LPR like the ECV86
+    # gate-in camera). When set, the orchestrator buffers plates from here
+    # instead of polling `base_url/checklpr`.
+    update_topic: str = ""
 
 
 @dataclass(frozen=True)
@@ -149,6 +155,7 @@ class DeviceRegistry:
                     ).rstrip("/"),
                     serves_http=_as_bool(config.get("serves_http"), True),
                     pos_topic_gate=_as_str(config.get("pos_topic_gate"), code),
+                    update_topic=_as_str(config.get("update_topic")).strip(),
                 )
             elif "camera" in kind:
                 cameras[device.name] = CameraDevice(
@@ -167,6 +174,8 @@ class DeviceRegistry:
                     host=device.ip_address,
                     serial_no=_as_str(config.get("serial_no")),
                     gate_type=gate.type.value,
+                    connection_type=_as_str(config.get("connection_type"), "mqtt"),
+                    tcp_port=int(config.get("tcp_port") or 5000),
                 )
             else:
                 logger.warning("device %s has unknown type %r — ignored", device.name, device.type)

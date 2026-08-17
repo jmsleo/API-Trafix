@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     button_debounce_seconds: float = 5.0
     barrier_pulse_ms: int = 1000
     barrier_beep_ms: int = 100
+    # Push-style LPR (ECV86 camera): how long the ticket button waits for a
+    # buffered plate before printing one without it, and how old a buffered
+    # plate may be before it is considered a different car.
+    lpr_plate_wait_seconds: float = 3.0
+    lpr_plate_max_age_seconds: float = 30.0
     # An unregistered (or expired) RFID tap must not strand the driver at the
     # barrier: fall back to the paper-ticket flow instead of refusing.
     card_fallback_to_ticket: bool = True
@@ -77,6 +82,45 @@ class Settings(BaseSettings):
     mqtt_password: str = Field(default="BCTDev_2025", validation_alias="MQTT_PASSWORD")
     mqtt_client_id_prefix: str = Field(
         default="api-trafix", validation_alias="MQTT_CLIENT_ID_PREFIX"
+    )
+
+    # TCP gateway for gate controllers that speak raw TCP instead of MQTT.
+    tcp_enabled: bool = Field(default=False, validation_alias="TCP_ENABLED")
+    tcp_default_port: int = Field(default=5000, validation_alias="TCP_DEFAULT_PORT")
+    tcp_heartbeat_interval_seconds: float = Field(
+        default=30.0, validation_alias="TCP_HEARTBEAT_INTERVAL"
+    )
+    tcp_heartbeat_fail_threshold: int = Field(
+        default=3, validation_alias="TCP_HEARTBEAT_FAIL_THRESHOLD"
+    )
+    tcp_reconnect_interval_seconds: float = Field(
+        default=5.0, validation_alias="TCP_RECONNECT_INTERVAL"
+    )
+    tcp_reconnect_max_retries: int = Field(
+        default=3, validation_alias="TCP_RECONNECT_MAX_RETRIES"
+    )
+
+    # Signage display (pw-signage) publishing. The display app runs against the
+    # legacy broker and may be migrated later, so messages mirror to every
+    # configured broker. ``signage_public_base_url`` is what the display uses to
+    # fetch uploaded media files.
+    signage_public_base_url: str = Field(
+        default="http://192.168.1.13:8000",
+        validation_alias="SIGNAGE_PUBLIC_BASE_URL",
+    )
+    signage_legacy_brokers: list[dict[str, object]] = Field(
+        default=[
+            {
+                "host": "192.168.1.1",
+                "port": 1883,
+                "username": "bssparking",
+                "password": "BCTDev_2025",
+            }
+        ],
+        validation_alias="SIGNAGE_LEGACY_BROKERS",
+    )
+    signage_sync_interval_seconds: float = Field(
+        default=60.0, validation_alias="SIGNAGE_SYNC_INTERVAL_SECONDS"
     )
 
     allowed_origins: list[str] = Field(

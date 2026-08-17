@@ -23,13 +23,17 @@ from api_trafix.core.middleware import (
 from api_trafix.core.scheduler import run_periodic_tasks
 from api_trafix.services.device_registry import DeviceRegistry
 from api_trafix.services.gate_cycle import GateCycleConfig, GateCycleService, NullPublisher
+from api_trafix.services.gate_health import GateHealth
 from api_trafix.services.lpr_plates import LprPlateBuffer
 from api_trafix.services.mqtt_bus import MqttBus
 from api_trafix.services.orchestrator import Orchestrator
 from api_trafix.services.publisher import MqttPublisher
 from api_trafix.services.seed import seed_reference_data
 from api_trafix.services.signage_publisher import SignagePublisher
+from api_trafix.services.signage_display import get_signage_service
 from api_trafix.services.snapshots import SnapshotStore
+from api_trafix.services.system_status import SystemStatus
+from api_trafix.services.tcp_gateway import TcpGateway
 from api_trafix.routes import (
     backup,
     finance_dashboard,
@@ -49,6 +53,7 @@ from api_trafix.routes import (
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_subscription, signage, backup, audit_log
 from api_trafix.routes import devices, gates
+from api_trafix.routes import events, gate_control, system, signage_display
 
 logging.basicConfig(level=logging.INFO)
 
@@ -80,6 +85,18 @@ async def lifespan(app: FastAPI):
     plates = LprPlateBuffer()
     app.state.lpr_plates = plates
 
+    sys_status = SystemStatus()
+    app.state.system_status = sys_status
+
+    gate_health = GateHealth()
+    app.state.gate_health = gate_health
+    for ctrl in registry.controllers():
+        gate_health.register(ctrl)
+
+    # Initialize signage display service for web-based displays
+    signage_display = get_signage_service()
+    app.state.signage_display = signage_display
+
     orchestrator: Orchestrator | None = None
     signage_publisher: SignagePublisher | None = None
     if settings.mqtt_enabled:
@@ -90,6 +107,8 @@ async def lifespan(app: FastAPI):
             password=settings.mqtt_password or None,
             client_id=settings.mqtt_client_id_prefix,
             keepalive=settings.mqtt_keepalive,
+            on_connect=sys_status.on_mqtt_connect,
+            on_disconnect=sys_status.on_mqtt_disconnect,
         )
         mirrors: list[MqttBus] = []
         for index, broker in enumerate(settings.signage_legacy_brokers):
@@ -117,6 +136,29 @@ async def lifespan(app: FastAPI):
         app.state.signage_publisher = None
         publisher = NullPublisher()
 
+    # TCP gateway for controllers that speak raw TCP.
+    tcp_gateway: TcpGateway | None = None
+    if settings.tcp_enabled:
+        tcp_gateway = TcpGateway(
+            gate_health=gate_health,
+            heartbeat_interval=settings.tcp_heartbeat_interval_seconds,
+            reconnect_interval=settings.tcp_reconnect_interval_seconds,
+            max_reconnect_retries=settings.tcp_reconnect_max_retries,
+        )
+        for ctrl in registry.controllers().values():
+            if ctrl.connection_type in ("tcp", "both"):
+                tcp_gateway.register_gate(
+                    ctrl.gate_code, ctrl.host, ctrl.tcp_port
+                )
+        await tcp_gateway.start()
+        sys_status.set_tcp_counts(
+            tcp_gateway.get_connected_count(),
+            tcp_gateway.get_total_count(),
+        )
+        app.state.tcp_gateway = tcp_gateway
+    else:
+        app.state.tcp_gateway = None
+
     app.state.gate_cycle = GateCycleService(
         async_session_maker,
         publisher=publisher,
@@ -137,6 +179,9 @@ async def lifespan(app: FastAPI):
             registry=registry,
             plates=plates,
             signage=signage_publisher,
+            gate_health=gate_health,
+            tcp_gateway=tcp_gateway,
+            signage_display=signage_display,
         )
         await orchestrator.start()
 
@@ -237,9 +282,23 @@ app.include_router(gate_cycle.router)
 app.include_router(pos.router)
 app.include_router(gates.router)
 app.include_router(devices.router)
+app.include_router(gate_control.router)
+app.include_router(events.router)
+app.include_router(system.router)
+app.include_router(signage_display.router)
 storage_dir = Path(get_settings().storage_dir)
 storage_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/storage", StaticFiles(directory=storage_dir), name="storage")
+
+# Mount static files for signage display
+static_dir = Path(__file__).parent.parent.parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# Mount signage display HTML
+signage_dir = static_dir / "signage"
+if signage_dir.exists():
+    app.mount("/signage", StaticFiles(directory=signage_dir, html=True), name="signage")
 
 @app.get("/")
 async def root():

@@ -59,6 +59,8 @@ class MqttBus:
         client_id: str = "api-trafix",
         keepalive: int = 60,
         reconnect_seconds: float = 5.0,
+        on_connect: Callable[[str, int], None] | None = None,
+        on_disconnect: Callable[[], None] | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -67,6 +69,8 @@ class MqttBus:
         self._client_id = client_id
         self._keepalive = keepalive
         self._reconnect_seconds = reconnect_seconds
+        self._on_connect = on_connect
+        self._on_disconnect = on_disconnect
 
         self._envelope_handlers: dict[str, list[EnvelopeHandler]] = {}
         self._raw_handlers: dict[str, list[RawHandler]] = {}
@@ -90,7 +94,10 @@ class MqttBus:
 
     async def stop(self) -> None:
         self._stop.set()
+        was_connected = self._connected.is_set()
         self._connected.clear()
+        if was_connected and self._on_disconnect is not None:
+            self._on_disconnect()
         task, self._task = self._task, None
         if task is not None and not task.done():
             task.cancel()
@@ -166,6 +173,8 @@ class MqttBus:
                     for topic in self._topics():
                         await client.subscribe(topic, qos=1)
                     self._connected.set()
+                    if self._on_connect is not None:
+                        self._on_connect(self.host, self.port)
                     logger.info(
                         "connected to MQTT broker %s:%s as %s",
                         self.host,
@@ -187,6 +196,8 @@ class MqttBus:
                             task.cancel()
                         await asyncio.gather(reader, writer, return_exceptions=True)
                         self._connected.clear()
+                        if self._on_disconnect is not None:
+                            self._on_disconnect()
             except asyncio.CancelledError:
                 break
             except MqttError as exc:

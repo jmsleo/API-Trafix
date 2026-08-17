@@ -1,11 +1,13 @@
+import asyncio
+import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api_trafix.config.database import get_db
+from api_trafix.config.database import async_session_maker, get_db
 from api_trafix.config.settings import get_settings
 from api_trafix.core.dependencies import get_current_admin
 from api_trafix.crud import signage as crud
@@ -37,6 +39,20 @@ from api_trafix.schemas.signage import (
 )
 
 router = APIRouter(prefix="/signages", tags=["Signage"])
+
+logger = logging.getLogger(__name__)
+
+
+async def _trigger_signage_sync(request: Request) -> None:
+    """Fire-and-forget push of current signage content to the displays."""
+    publisher = getattr(request.app.state, "signage_publisher", None)
+    if publisher is None:
+        return
+    try:
+        async with async_session_maker() as db:
+            await publisher.sync_from_db(db)
+    except Exception:
+        logger.exception("signage sync after content change failed")
 
 
 def _page(total: int, page: int, page_size: int) -> int:
@@ -116,6 +132,7 @@ async def get_content(content_id: uuid.UUID, db: AsyncSession = Depends(get_db))
 
 @router.post("/contents", response_model=SignageContentRead, status_code=status.HTTP_201_CREATED)
 async def create_content(
+    request: Request,
     payload: SignageContentCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin),
@@ -123,11 +140,13 @@ async def create_content(
     db_obj = await crud.create_content(db, payload)
     await log_action(db, module="signage", action="create-content", user_id=current_user.id,
                      role=current_user.role.value, description=f"Created signage content '{db_obj.title}'")
+    asyncio.create_task(_trigger_signage_sync(request))
     return db_obj
 
 
 @router.put("/contents/{content_id}", response_model=SignageContentRead)
 async def update_content(
+    request: Request,
     content_id: uuid.UUID,
     payload: SignageContentUpdate,
     db: AsyncSession = Depends(get_db),
@@ -139,11 +158,13 @@ async def update_content(
     db_obj = await crud.update_content(db, db_obj, payload)
     await log_action(db, module="signage", action="update-content", user_id=current_user.id,
                      role=current_user.role.value, description=f"Updated signage content '{db_obj.title}'")
+    asyncio.create_task(_trigger_signage_sync(request))
     return db_obj
 
 
 @router.patch("/contents/{content_id}/status", response_model=SignageContentRead)
 async def update_content_status(
+    request: Request,
     content_id: uuid.UUID,
     payload: SignageContentStatusUpdate,
     db: AsyncSession = Depends(get_db),
@@ -156,11 +177,13 @@ async def update_content_status(
     await log_action(db, module="signage", action="update-content-status", user_id=current_user.id,
                      role=current_user.role.value,
                      description=f"Changed signage content '{db_obj.title}' active status to {db_obj.is_active}")
+    asyncio.create_task(_trigger_signage_sync(request))
     return db_obj
 
 
 @router.post("/contents/upload", response_model=SignageContentRead, status_code=status.HTTP_201_CREATED)
 async def upload_content(
+    request: Request,
     file: UploadFile = File(...),
     title: str = Form(...),
     content_type: str = Form(...),
@@ -210,6 +233,7 @@ async def upload_content(
     await log_action(db, module="signage", action="upload-content", user_id=current_user.id,
                      role=current_user.role.value,
                      description=f"Uploaded signage content '{db_obj.title}' ({type_filter.value}, {total} bytes)")
+    asyncio.create_task(_trigger_signage_sync(request))
     return db_obj
 
 
@@ -285,6 +309,7 @@ async def get_assignment(assignment_id: uuid.UUID, db: AsyncSession = Depends(ge
 
 @router.post("/assignments", response_model=SignageAssignmentRead, status_code=status.HTTP_201_CREATED)
 async def create_assignment(
+    request: Request,
     payload: SignageAssignmentCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin),
@@ -311,11 +336,13 @@ async def create_assignment(
     await log_action(db, module="signage", action="create-assignment", user_id=current_user.id,
                      role=current_user.role.value,
                      description=f"Assigned content '{content.title}' to signage '{signage.name}'")
+    asyncio.create_task(_trigger_signage_sync(request))
     return db_obj
 
 
 @router.patch("/assignments/{assignment_id}/status", response_model=SignageAssignmentRead)
 async def update_assignment_status(
+    request: Request,
     assignment_id: uuid.UUID,
     payload: SignageAssignmentStatusUpdate,
     db: AsyncSession = Depends(get_db),
@@ -328,11 +355,13 @@ async def update_assignment_status(
     await log_action(db, module="signage", action="update-assignment-status", user_id=current_user.id,
                      role=current_user.role.value,
                      description=f"Changed signage assignment active status to {db_obj.is_active}")
+    asyncio.create_task(_trigger_signage_sync(request))
     return db_obj
 
 
 @router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_assignment(
+    request: Request,
     assignment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin),
@@ -344,6 +373,7 @@ async def delete_assignment(
                      role=current_user.role.value,
                      description=f"Deleted signage assignment (signage '{db_obj.signage.name}', content '{db_obj.content.title}')")
     await crud.delete_assignment(db, db_obj)
+    asyncio.create_task(_trigger_signage_sync(request))
     return None
 
 

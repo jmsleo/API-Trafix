@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parking Gate Signage</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            height: 60px;
+        }
+
+        .gate-info {
+            text-align: right;
+            font-size: 1.2em;
+        }
+
+        .gate-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #4ecdc4;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        .status-text {
+            font-size: 4em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-text.welcome {
+            color: #4ecdc4;
+        }
+
+        .status-text.thanks {
+            color: #ff6b6b;
+        }
+
+        .status-text.idle {
+            color: #95afc0;
+        }
+
+        .plate-display {
+            font-size: 3em;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 20px 40px;
+            border-radius: 15px;
+            border: 3px solid #4ecdc4;
+            margin-bottom: 20px;
+            min-width: 400px;
+        }
+
+        .transaction-code {
+            font-size: 1.5em;
+            color: #a0a0a0;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* Ads Section */
+        .ads-section {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            height: 200px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .ads-container {
+            display: flex;
+            height: 100%;
+            animation: scroll 30s linear infinite;
+        }
+
+        .ad-item {
+            min-width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .ad-item img {
+            max-height: 100%;
+            max-width: 100%;
+            object-fit: contain;
+        }
+
+        @keyframes scroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-100%); }
+        }
+
+        /* Idle Background */
+        .idle-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-position: center;
+            z-index: -1;
+            opacity: 0.3;
+        }
+
+        /* Audio */
+        .audio-controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+
+        .audio-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+        }
+
+        .audio-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Connection Status */
+        .connection-status {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.8em;
+        }
+
+        .connection-status.connected {
+            background: rgba(78, 205, 196, 0.3);
+            color: #4ecdc4;
+        }
+
+        .connection-status.disconnected {
+            background: rgba(255, 107, 107, 0.3);
+            color: #ff6b6b;
+        }
+
+        /* Clock */
+        .clock {
+            font-size: 1.5em;
+            color: #a0a0a0;
+        }
+    </style>
+</head>
+<body>
+    <div class="idle-background" id="idleBackground"></div>
+
+    <div class="container">
+        <div class="header">
+            <img src="/storage/signage/logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+            <div class="gate-info">
+                <div class="gate-number" id="gateNumber">-</div>
+                <div class="clock" id="clock"></div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="status-text" id="statusText">Memuat...</div>
+            <div class="plate-display" id="plateDisplay" style="display: none;">
+                <span id="plateNumber">-</span>
+            </div>
+            <div class="transaction-code" id="transactionCode" style="display: none;">
+                Kode: <span id="trxCode">-</span>
+            </div>
+        </div>
+
+        <div class="ads-section" id="adsSection" style="display: none;">
+            <div class="ads-container" id="adsContainer"></div>
+        </div>
+    </div>
+
+    <div class="audio-controls">
+        <button class="audio-btn" id="audioBtn" onclick="toggleAudio()">🔊 Suara</button>
+    </div>
+
+    <div class="connection-status disconnected" id="connectionStatus">
+        Menghubungkan...
+    </div>
+
+    <script>
+        // Configuration
+        const GATE_CODE = new URLSearchParams(window.location.search).get('gate') || '1';
+        const API_BASE = window.location.origin;
+
+        // State
+        let eventSource = null;
+        let audioEnabled = true;
+        let currentStatus = 'idle';
+        let ads = [];
+        let currentAdIndex = 0;
+
+        // Audio elements
+        const sounds = {
+            welcome: new Audio('/storage/signage/audio/welcome.wav'),
+            thanks: new Audio('/storage/signage/audio/thanks.wav'),
+            error: new Audio('/storage/signage/audio/error.wav'),
+        };
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('gateNumber').textContent = `Gate ${GATE_CODE}`;
+            updateClock();
+            setInterval(updateClock, 1000);
+            connectSSE();
+        });
+
+        // Clock
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = now.toLocaleTimeString('id-ID');
+        }
+
+        // SSE Connection
+        function connectSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            eventSource = new EventSource(`${API_BASE}/api/signage/stream/${GATE_CODE}`);
+
+            eventSource.onopen = () => {
+                updateConnectionStatus(true);
+            };
+
+            eventSource.onerror = () => {
+                updateConnectionStatus(false);
+                setTimeout(connectSSE, 5000);
+            };
+
+            eventSource.addEventListener('status', (e) => {
+                const data = JSON.parse(e.data);
+                updateStatus(data);
+            });
+
+            eventSource.addEventListener('ads', (e) => {
+                const data = JSON.parse(e.data);
+                updateAds(data.ads);
+            });
+
+            eventSource.addEventListener('idle', (e) => {
+                const data = JSON.parse(e.data);
+                updateIdleImage(data.image);
+            });
+
+            eventSource.addEventListener('ping', () => {
+                // Keepalive
+            });
+        }
+
+        function updateConnectionStatus(connected) {
+            const el = document.getElementById('connectionStatus');
+            el.className = `connection-status ${connected ? 'connected' : 'disconnected'}`;
+            el.textContent = connected ? 'Terhubung' : 'Menyambungkan...';
+        }
+
+        // Status Updates
+        function updateStatus(data) {
+            const statusText = document.getElementById('statusText');
+            const plateDisplay = document.getElementById('plateDisplay');
+            const transactionCode = document.getElementById('transactionCode');
+
+            currentStatus = data.status;
+            statusText.className = `status-text ${data.status}`;
+
+            switch (data.status) {
+                case 'welcome':
+                    statusText.textContent = 'Selamat Datang';
+                    playSound('welcome');
+                    break;
+                case 'thanks':
+                    statusText.textContent = 'Terima Kasih';
+                    playSound('thanks');
+                    break;
+                case 'idle':
+                    statusText.textContent = 'Parkir BSS';
+                    break;
+                default:
+                    statusText.textContent = data.status;
+            }
+
+            if (data.plate_number) {
+                plateDisplay.style.display = 'block';
+                document.getElementById('plateNumber').textContent = data.plate_number;
+            } else {
+                plateDisplay.style.display = 'none';
+            }
+
+            if (data.transaction_code) {
+                transactionCode.style.display = 'block';
+                document.getElementById('trxCode').textContent = data.transaction_code;
+            } else {
+                transactionCode.style.display = 'none';
+            }
+        }
+
+        // Ads
+        function updateAds(newAds) {
+            ads = newAds;
+            const container = document.getElementById('adsContainer');
+            const section = document.getElementById('adsSection');
+
+            if (ads.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+
+            section.style.display = 'block';
+            container.innerHTML = ads.map(ad => `
+                <div class="ad-item">
+                    <img src="${ad.image_url}" alt="${ad.ads_name}" onerror="this.style.display='none'">
+                </div>
+            `).join('');
+        }
+
+        // Idle Image
+        function updateIdleImage(image) {
+            const bg = document.getElementById('idleBackground');
+            if (image && image.image_url) {
+                bg.style.backgroundImage = `url(${image.image_url})`;
+                bg.style.opacity = '0.3';
+            } else {
+                bg.style.backgroundImage = 'none';
+            }
+        }
+
+        // Audio
+        function playSound(type) {
+            if (!audioEnabled || !sounds[type]) return;
+            sounds[type].currentTime = 0;
+            sounds[type].play().catch(() => {});
+        }
+
+        function toggleAudio() {
+            audioEnabled = !audioEnabled;
+            const btn = document.getElementById('audioBtn');
+            btn.textContent = audioEnabled ? '🔊 Suara' : '🔇 Bisu';
+        }
+
+        // Fullscreen on click
+        document.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
+        });
+    </script>
+</body>
+</html>
