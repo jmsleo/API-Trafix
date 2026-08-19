@@ -39,6 +39,20 @@ class Settings(BaseSettings):
     backup_restore_timeout_seconds: int = 300
     backup_upload_max_mb: int = 2048
 
+    # Daily scheduled backup. Runs every day at ``daily_backup_time`` in
+    # ``daily_backup_timezone`` (default: 00:00 WIB).
+    daily_backup_enabled: bool = Field(default=True, validation_alias="DAILY_BACKUP_ENABLED")
+    daily_backup_time: str = Field(default="00:00", validation_alias="DAILY_BACKUP_TIME")
+    daily_backup_timezone: str = Field(default="Asia/Jakarta", validation_alias="DAILY_BACKUP_TIMEZONE")
+
+    # Weekly audit-log cleanup. Deletes ALL audit logs every ``audit_cleanup_weekday``
+    # (0=Mon..6=Sun) at ``audit_cleanup_time`` in ``audit_cleanup_timezone``
+    # (default: every Sunday 23:59 WIB).
+    audit_cleanup_enabled: bool = Field(default=True, validation_alias="AUDIT_CLEANUP_ENABLED")
+    audit_cleanup_weekday: int = Field(default=6, validation_alias="AUDIT_CLEANUP_WEEKDAY")
+    audit_cleanup_time: str = Field(default="23:59", validation_alias="AUDIT_CLEANUP_TIME")
+    audit_cleanup_timezone: str = Field(default="Asia/Jakarta", validation_alias="AUDIT_CLEANUP_TIMEZONE")
+
     signage_media_dir: str = Field(default="media/signages", validation_alias="SIGNAGE_MEDIA_DIR")
     signage_upload_max_mb: int = 50
     signage_allowed_image_extensions: str = "jpg,jpeg,png,gif,webp"

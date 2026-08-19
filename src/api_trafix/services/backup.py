@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,9 @@ from api_trafix.config.settings import get_settings
 from api_trafix.crud import backup as crud
 from api_trafix.models import Backup, BackupStatus, User
 from api_trafix.services.audit import log_action
+
+
+logger = logging.getLogger(__name__)
 
 
 class BackupError(Exception):
@@ -83,12 +87,39 @@ async def start_backup(db: AsyncSession, user: User) -> Backup:
     return record
 
 
-async def _perform_backup(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
+async def run_daily_backup() -> Backup:
+    """Create a backup record and kick off the dump without a user context.
+
+    Used by the daily scheduler; ``created_by`` stays NULL and the audit log is
+    skipped (there is no actor).
+    """
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    filename = f"scheduled_{stamp}_{uuid.uuid4().hex[:8]}.dump"
+
+    async with async_session_maker() as db:
+        record = Backup(
+            filename=filename,
+            format="custom",
+            size_bytes=0,
+            progress=0,
+            status=BackupStatus.RUNNING,
+            created_by=None,
+        )
+        db.add(record)
+        await db.commit()
+        record_id = record.id
+
+    asyncio.create_task(_perform_backup(record_id, None))
+    logger.info("daily_backup: scheduled backup %s started", filename)
+    return record
+
+
+async def _perform_backup(backup_id: uuid.UUID, user_id: uuid.UUID | None) -> None:
     async with _lock, async_session_maker() as db:
             record = await crud.get_by_id(db, backup_id)
             if record is None:
                 return
-            user = await db.get(User, user_id)
+            user = await db.get(User, user_id) if user_id is not None else None
             await db.commit()
             filename = record.filename
             target = _backup_dir() / filename

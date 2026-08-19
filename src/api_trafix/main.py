@@ -20,7 +20,11 @@ from api_trafix.core.middleware import (
     RequestBodyLimitMiddleware,
     SecurityHeadersMiddleware,
 )
-from api_trafix.core.scheduler import run_periodic_tasks
+from api_trafix.core.scheduler import (
+    run_daily_backup_loop,
+    run_periodic_tasks,
+    run_weekly_audit_cleanup_loop,
+)
 from api_trafix.services.device_registry import DeviceRegistry
 from api_trafix.services.gate_cycle import GateCycleConfig, GateCycleService, NullPublisher
 from api_trafix.services.gate_health import GateHealth
@@ -235,10 +239,18 @@ async def lifespan(app: FastAPI):
                 await signage_publisher.sync_from_db(db)
 
     background_task = asyncio.create_task(run_periodic_tasks(signage=signage_publisher))
+    daily_backup_task = asyncio.create_task(run_daily_backup_loop())
+    audit_cleanup_task = asyncio.create_task(run_weekly_audit_cleanup_loop())
     yield
     background_task.cancel()
+    daily_backup_task.cancel()
+    audit_cleanup_task.cancel()
     with suppress(asyncio.CancelledError):
         await background_task
+    with suppress(asyncio.CancelledError):
+        await daily_backup_task
+    with suppress(asyncio.CancelledError):
+        await audit_cleanup_task
     if orchestrator is not None:
         await orchestrator.stop()
     if signage_publisher is not None:
