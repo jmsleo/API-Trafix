@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.config.database import async_session_maker, get_db
 from api_trafix.config.settings import get_settings
-from api_trafix.core.dependencies import get_current_admin
+from api_trafix.core.dependencies import get_current_admin_or_teknisi
 from api_trafix.crud import signage as crud
 from api_trafix.models import SignageContentType, User
 from api_trafix.services import signage_media as media_service
@@ -82,7 +82,7 @@ async def list_signages(
 async def create_signage(
     payload: SignageCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     existing = await crud.get_signage_by_code(db, payload.code)
     if existing is not None:
@@ -135,7 +135,7 @@ async def create_content(
     request: Request,
     payload: SignageContentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.create_content(db, payload)
     await log_action(db, module="signage", action="create-content", user_id=current_user.id,
@@ -150,7 +150,7 @@ async def update_content(
     content_id: uuid.UUID,
     payload: SignageContentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
@@ -168,7 +168,7 @@ async def update_content_status(
     content_id: uuid.UUID,
     payload: SignageContentStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
@@ -188,7 +188,7 @@ async def upload_content(
     title: str = Form(...),
     content_type: str = Form(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     try:
         type_filter = SignageContentType(content_type)
@@ -257,7 +257,7 @@ async def get_content_file(content_id: uuid.UUID, db: AsyncSession = Depends(get
 async def delete_content(
     content_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
@@ -312,7 +312,7 @@ async def create_assignment(
     request: Request,
     payload: SignageAssignmentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     signage = await crud.get_signage(db, payload.signage_id)
     if signage is None:
@@ -346,7 +346,7 @@ async def update_assignment_status(
     assignment_id: uuid.UUID,
     payload: SignageAssignmentStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_assignment(db, assignment_id)
     if db_obj is None:
@@ -364,7 +364,7 @@ async def delete_assignment(
     request: Request,
     assignment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_assignment(db, assignment_id)
     if db_obj is None:
@@ -414,7 +414,7 @@ async def get_schedule(schedule_id: uuid.UUID, db: AsyncSession = Depends(get_db
 async def create_schedule(
     payload: SignageScheduleCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     signage = await crud.get_signage(db, payload.signage_id)
     if signage is None:
@@ -434,7 +434,7 @@ async def update_schedule(
     schedule_id: uuid.UUID,
     payload: SignageScheduleUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
@@ -458,7 +458,7 @@ async def update_schedule_status(
     schedule_id: uuid.UUID,
     payload: SignageScheduleStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
@@ -474,7 +474,7 @@ async def update_schedule_status(
 async def delete_schedule(
     schedule_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
@@ -502,7 +502,7 @@ async def update_signage(
     signage_id: uuid.UUID,
     payload: SignageUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
@@ -522,7 +522,7 @@ async def update_signage_status(
     signage_id: uuid.UUID,
     payload: SignageStatusUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
@@ -537,7 +537,7 @@ async def update_signage_status(
 async def delete_signage(
     signage_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:

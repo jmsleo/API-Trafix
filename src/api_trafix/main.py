@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api_trafix.config.database import async_session_maker, init_db
 from api_trafix.config.redis import close_redis
-from api_trafix.config.settings import get_settings
+from api_trafix.config.settings import Settings, get_settings
 from api_trafix.models import Backup, BackupStatus
 from sqlalchemy import update as sa_update
 from api_trafix.core.middleware import (
@@ -53,9 +53,47 @@ from api_trafix.routes import (
 from api_trafix.routes.auth import router as auth_router
 from api_trafix.routes import member, shift, vehicle_type, parking_rate, users, finance_dashboard, finance_reports, operator_shift_assignment, operator_session, subscription_plan, member_subscription, signage, backup, audit_log
 from api_trafix.routes import devices, gates
-from api_trafix.routes import events, gate_control, system, signage_display
+from api_trafix.routes import events, gate_control, monitoring, system, signage_display
 
 logging.basicConfig(level=logging.INFO)
+
+
+_MQTT_KEY_MAP = {
+    "host": "mqtt_host",
+    "port": "mqtt_port",
+    "keepalive": "mqtt_keepalive",
+    "username": "mqtt_username",
+    "password": "mqtt_password",
+    "client_id_prefix": "mqtt_client_id_prefix",
+}
+
+
+async def _load_effective_settings() -> Settings:
+    """Merge persisted ``system_config`` overrides on top of env settings.
+
+    MQTT broker values edited from the Teknisi portal are stored in the
+    ``system_config`` table and applied here at startup, so a config change
+    becomes effective on the next restart.
+    """
+    base = get_settings()
+    try:
+        async with async_session_maker() as db:
+            from api_trafix.crud import system_config as config_crud
+
+            values = await config_crud.get_section(db, "mqtt")
+    except Exception:  # noqa: BLE001  (missing table / DB down: fall back to env)
+        values = {}
+    overrides: dict[str, object] = {}
+    for key, entry in values.items():
+        attr = _MQTT_KEY_MAP.get(key)
+        if attr is not None and isinstance(entry, dict) and "value" in entry:
+            overrides[attr] = entry["value"]
+    if not overrides:
+        return base
+    try:
+        return Settings(**overrides)
+    except Exception:  # noqa: BLE001  (bad stored value: fall back to env)
+        return base
 
 
 @asynccontextmanager
@@ -76,7 +114,8 @@ async def lifespan(app: FastAPI):
         )
         await db.commit()
 
-    settings = get_settings()
+    settings = await _load_effective_settings()
+    app.state.settings = settings
     storage = SnapshotStore(Path(settings.storage_dir))
     registry = DeviceRegistry(async_session_maker)
     await registry.reload()
@@ -123,7 +162,8 @@ async def lifespan(app: FastAPI):
             await mirror.start()
             mirrors.append(mirror)
         signage_publisher = SignagePublisher(
-            bus, mirrors, base_url=settings.signage_public_base_url
+            bus, mirrors, base_url=settings.signage_public_base_url,
+            display=signage_display,
         )
         app.state.signage_publisher = signage_publisher
         publisher = MqttPublisher(
@@ -285,6 +325,7 @@ app.include_router(devices.router)
 app.include_router(gate_control.router)
 app.include_router(events.router)
 app.include_router(system.router)
+app.include_router(monitoring.router)
 app.include_router(signage_display.router)
 storage_dir = Path(get_settings().storage_dir)
 storage_dir.mkdir(parents=True, exist_ok=True)

@@ -58,6 +58,7 @@ from api_trafix.services.protocol import (
     METHOD_READ_CARD,
     METHOD_STATUS,
     METHOD_TX_UART_DATA,
+    STATUS_MEMBER_NOT_FOUND,
     STATUS_THANKS,
     STATUS_WELCOME,
     Envelope,
@@ -369,18 +370,15 @@ class Orchestrator:
 
         member = await self._request_member_entry(gate, card_no, message.serial_no)
         if member is None:
-            if self.settings.card_fallback_to_ticket:
-                logger.warning(
-                    "gate %s: card %s not registered — falling back to a "
-                    "paper ticket so the driver is not stranded",
-                    gate,
-                    card_no,
-                )
-                await self._handle_button(gate, message)
-            else:
-                logger.warning(
-                    "gate %s: member entry refused for card %s", gate, card_no
-                )
+            # Unknown card: never print a ticket and never open the barrier.
+            # Warn the driver via the signage display voice ("member tidak
+            # terdaftar") so they know to register at the counter.
+            logger.warning(
+                "gate %s: card %s not registered — warning driver, barrier stays shut",
+                gate,
+                card_no,
+            )
+            self._signage_status(gate, STATUS_MEMBER_NOT_FOUND)
             return
 
         if member is MEMBER_REFUSED:

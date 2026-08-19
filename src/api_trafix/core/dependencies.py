@@ -134,6 +134,8 @@ def require_roles(*roles: UserRole) -> Callable:
 get_current_admin = require_roles(UserRole.ADMIN)
 get_current_finance = require_roles(UserRole.FINANCE)
 get_current_operator = require_roles(UserRole.OPERATOR)
+get_current_teknisi = require_roles(UserRole.TEKNISI)
+get_current_admin_or_teknisi = require_roles(UserRole.ADMIN, UserRole.TEKNISI)
 
 
 async def get_active_operator_session(

@@ -24,13 +24,51 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/signage", tags=["Signage Display"])
 
 
+def _sse_frame(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def _body(request: Request) -> dict[str, Any]:
+    """The request body as a dict, tolerant of how it was sent.
+
+    The GPIO bridge posts JSON (``requests.post(..., json=...)``), but a bare
+    ``curl -d '{"gate":"1"}'`` without the ``Content-Type`` header sends the
+    same body as ``application/x-www-form-urlencoded``. Try JSON regardless of
+    the header so both work; fall back to form fields; an empty/invalid body
+    becomes ``{}`` so a caller mistake returns a 400 instead of a 500.
+    """
+    content_type = request.headers.get("content-type", "")
+
+    if "application/json" in content_type:
+        try:
+            payload = await request.json()
+        except (ValueError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    raw = await request.body()
+    if raw:
+        try:
+            payload = json.loads(raw)
+            if isinstance(payload, dict):
+                return payload
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+    if "form-data" in content_type or "x-www-form-urlencoded" in content_type:
+        form = await request.form()
+        return {key: form[key] for key in form}
+
+    return {}
+
+
 @router.post("/vehicle-detected")
 async def vehicle_detected(request: Request):
     """Called by GPIO bridge when a vehicle is detected on the arrival loop.
 
     Triggers the 'welcome' status on the signage display.
     """
-    body = await request.json()
+    body = await _body(request)
     gate_code = body.get("gate")
     if not gate_code:
         raise HTTPException(status_code=400, detail="gate code required")
@@ -52,7 +90,7 @@ async def help_button(request: Request):
 
     Logs the event and could trigger an intercom call.
     """
-    body = await request.json()
+    body = await _body(request)
     gate_code = body.get("gate")
     if not gate_code:
         raise HTTPException(status_code=400, detail="gate code required")
@@ -90,7 +128,7 @@ async def get_signage_status(gate_code: str):
 @router.post("/status/{gate_code}")
 async def update_signage_status(gate_code: str, request: Request):
     """Manually update signage status (for testing or admin control)."""
-    body = await request.json()
+    body = await _body(request)
     status = body.get("status")
     if not status:
         raise HTTPException(status_code=400, detail="status required")
@@ -132,49 +170,43 @@ async def signage_stream(gate_code: str):
         try:
             # Send initial state
             state = service.get_state(gate_code)
-            yield {
-                "event": "status",
-                "data": json.dumps({
-                    "gate": gate_code,
-                    "status": state.status,
-                    "plate_number": state.plate_number,
-                    "transaction_code": state.transaction_code,
-                }),
-            }
+            yield _sse_frame("status", {
+                "gate": gate_code,
+                "status": state.status,
+                "plate_number": state.plate_number,
+                "transaction_code": state.transaction_code,
+            })
 
             # Send ads
             if state.ads:
-                yield {
-                    "event": "ads",
-                    "data": json.dumps({
-                        "gate": gate_code,
-                        "ads": state.ads,
-                    }),
-                }
+                yield _sse_frame("ads", {
+                    "gate": gate_code,
+                    "ads": state.ads,
+                })
 
             # Send idle image
             if state.idle_image:
-                yield {
-                    "event": "idle",
-                    "data": json.dumps({
-                        "gate": gate_code,
-                        "image": state.idle_image,
-                    }),
-                }
+                yield _sse_frame("idle", {
+                    "gate": gate_code,
+                    "image": state.idle_image,
+                })
+
+            # Send media playlist
+            if state.media:
+                yield _sse_frame("media", {
+                    "gate": gate_code,
+                    "media": state.media,
+                })
 
             # Listen for updates
             while True:
                 try:
                     message = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield {
-                        "event": message.get("event", "update"),
-                        "data": json.dumps(message),
-                    }
+                    yield _sse_frame(message.get("event", "status"), message)
                 except asyncio.TimeoutError:
-                    # Send keepalive
-                    yield {"event": "ping", "data": "{}"}
+                    yield ": keepalive\n\n"
         finally:
-            service.unsubscribe(gate_code)
+            service.unsubscribe(gate_code, queue)
 
     return StreamingResponse(
         event_generator(),

@@ -68,9 +68,6 @@ class Settings(BaseSettings):
     # plate may be before it is considered a different car.
     lpr_plate_wait_seconds: float = 3.0
     lpr_plate_max_age_seconds: float = 30.0
-    # An unregistered (or expired) RFID tap must not strand the driver at the
-    # barrier: fall back to the paper-ticket flow instead of refusing.
-    card_fallback_to_ticket: bool = True
 
     # MQTT bridge to the gate boards. Disabled by default: the gate cycle then
     # uses a NullPublisher and no broker is contacted.

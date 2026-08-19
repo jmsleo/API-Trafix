@@ -72,7 +72,6 @@ def _settings(**overrides) -> SimpleNamespace:
         "button_debounce_seconds": 5.0,
         "barrier_pulse_ms": 1000,
         "barrier_beep_ms": 100,
-        "card_fallback_to_ticket": True,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -134,17 +133,16 @@ async def test_rfid_only_still_delivers_read_card(orche, monkeypatch):
     monkeypatch.setattr(orchestrator, "_handle_button", fake_button)
     await handler("g/event/1", read_card("441D6491AF17", "006343040"))
     assert seen == [("1", "006343040")]
-    assert fallback == [("1", "readCard")]
+    assert fallback == []  # unknown card warns, never issues a ticket
 
 
-async def test_unregistered_card_falls_back_to_a_paper_ticket(orche, monkeypatch):
-    """A card that is not a member must not strand the driver: issue a ticket."""
-    orchestrator, handler, _bus = orche(rfid_only=False)
+async def test_unregistered_card_warns_and_stays_shut(orche, monkeypatch):
+    """An unknown card never prints a ticket or opens the barrier; it warns."""
+    orchestrator, handler, bus = orche(rfid_only=False)
+    fallback = []
 
     async def fake_member(gate, card_no, serial_no):
         return None
-
-    fallback = []
 
     async def fake_button(gate, message):
         fallback.append(gate)
@@ -152,7 +150,12 @@ async def test_unregistered_card_falls_back_to_a_paper_ticket(orche, monkeypatch
     monkeypatch.setattr(orchestrator, "_request_member_entry", fake_member)
     monkeypatch.setattr(orchestrator, "_handle_button", fake_button)
     await handler("g/event/1", read_card("441D6491AF17", "006343040"))
-    assert fallback == ["1"]
+    assert fallback == []
+    payloads = " ".join(p for _, p in bus.published)
+    assert "txUartData" not in payloads  # no paper ticket
+    assert not any("/GATE/IN/1" == topic for topic, _ in bus.published)  # barrier stays shut
+    assert any("/status" in topic for topic, _ in bus.published)  # warning voice
+    assert '"member_not_found"' in payloads
 
 
 async def test_registered_but_refused_member_gets_no_ticket(orche, monkeypatch):
@@ -174,25 +177,6 @@ async def test_registered_but_refused_member_gets_no_ticket(orche, monkeypatch):
     assert "txUartData" not in payloads  # no print commands
     assert any("/status" in topic for topic, _ in bus.published)  # "thanks"
     assert any("/GATE/IN/1" == topic for topic, _ in bus.published)  # barrier opens
-
-
-async def test_refused_card_does_not_fall_back_when_disabled(orche, monkeypatch):
-    orchestrator, handler, bus = orche(rfid_only=False)
-    orchestrator.settings = _settings(card_fallback_to_ticket=False)
-
-    async def fake_member(gate, card_no, serial_no):
-        return None
-
-    fallback = []
-
-    async def fake_button(gate, message):
-        fallback.append(gate)
-
-    monkeypatch.setattr(orchestrator, "_request_member_entry", fake_member)
-    monkeypatch.setattr(orchestrator, "_handle_button", fake_button)
-    await handler("g/event/1", read_card("441D6491AF17", "006343040"))
-    assert fallback == []
-    assert bus.published == []
 
 
 async def test_exit_read_settles_and_raises_the_barrier(orche, monkeypatch):

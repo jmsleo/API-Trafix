@@ -1,0 +1,143 @@
+# docker-compose.sim.yml — Full simulation stack for API-Trafix.
+#
+# Usage:
+#   docker compose -f docker-compose.sim.yml up -d --build
+#
+# This adds mock LPR camera and mock TCP controller to the base stack.
+# The mock gate controller runs outside Docker (interactive CLI).
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────
+
+  db:
+    image: postgres:17
+    container_name: api-trafix-sim-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trafix
+      POSTGRES_PASSWORD: trafix
+      POSTGRES_DB: trafix
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata-sim:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trafix"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: api-trafix-sim-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata-sim:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: api-trafix-sim-mqtt
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-bssparking}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-BCTDev_2025}
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./deploy/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./deploy/mosquitto-entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      - mqttdata-sim:/mosquitto/data
+      - mqttlog-sim:/mosquitto/log
+
+  adminer:
+    image: adminer:latest
+    container_name: api-trafix-sim-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+  # ── Mock Hardware ───────────────────────────────────────────────
+
+  mock-lpr:
+    build:
+      context: scripts/simulation
+      dockerfile: Dockerfile.mock
+    container_name: api-trafix-sim-mock-lpr
+    command: python mock_lpr_camera.py
+    ports:
+      - "8090:8090"
+    environment:
+      PLATE_NUMBER: "B 1234 XYZ"
+      PORT: "8090"
+
+  mock-tcp:
+    build:
+      context: scripts/simulation
+      dockerfile: Dockerfile.mock
+    container_name: api-trafix-sim-mock-tcp
+    command: python mock_tcp_controller.py
+    ports:
+      - "5000:5000"
+    environment:
+      GATE_CODE: "1"
+      PORT: "5000"
+
+  # ── API Server ──────────────────────────────────────────────────
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-trafix-sim-api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://trafix:trafix@db:5432/trafix
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-sim-secret-key-change-in-production}
+      MQTT_ENABLED: "true"
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-bssparking}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-BCTDev_2025}
+      MQTT_CLIENT_ID_PREFIX: api-trafix-sim
+      TCP_ENABLED: "true"
+      TCP_DEFAULT_PORT: 5000
+      API_BASE_URL: http://api:8000
+      SITE_NAME: "Sim Parking"
+      SITE_ADDRESS: "Jl. Simulasi No. 1"
+      DEBUG: "true"
+      SIGNAGE_PUBLIC_BASE_URL: http://localhost:8000
+      SIGNAGE_MEDIA_DIR: /app/media/signages
+    volumes:
+      - mediasim:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata-sim:
+  redisdata-sim:
+  mqttdata-sim:
+  mediasim:
+  mqttlog-sim:

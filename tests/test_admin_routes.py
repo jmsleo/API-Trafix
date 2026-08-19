@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from api_trafix.config.database import get_db
-from api_trafix.core.dependencies import get_current_admin
+from api_trafix.core.dependencies import get_current_admin_or_teknisi
 from api_trafix.models.devices import Device
 from api_trafix.models.gates import Gate
 from api_trafix.models.park_transactions import DetectionMethod, ParkTransaction
@@ -58,7 +58,7 @@ async def client(db_sessionmaker, admin_user):
         return admin_user
 
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_current_admin] = override_admin
+    app.dependency_overrides[get_current_admin_or_teknisi] = override_admin
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

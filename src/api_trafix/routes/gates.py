@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.config.database import get_db
-from api_trafix.core.dependencies import get_current_admin
+from api_trafix.core.dependencies import get_current_admin_or_teknisi
 from api_trafix.crud import gate as crud
 from api_trafix.models import GateType, User
 from api_trafix.schemas.gate import GateCreate, GatePage, GateRead, GateUpdate
@@ -27,7 +27,7 @@ async def list_gates(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    _: User = Depends(get_current_admin_or_teknisi),
 ):
     items, total = await crud.get_all(
         db, search=search, gate_type=gate_type, page=page, page_size=page_size
@@ -42,7 +42,7 @@ async def list_gates(
 async def get_gate(
     gate_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    _: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_by_id(db, gate_id)
     if db_obj is None:
@@ -55,7 +55,7 @@ async def create_gate(
     payload: GateCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     if payload.gate_code and await crud.get_by_gate_code(db, payload.gate_code) is not None:
         raise HTTPException(
@@ -81,7 +81,7 @@ async def update_gate(
     payload: GateUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_by_id(db, gate_id)
     if db_obj is None:
@@ -113,7 +113,7 @@ async def delete_gate(
     gate_id: uuid.UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_by_id(db, gate_id)
     if db_obj is None:

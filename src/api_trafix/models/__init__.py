@@ -30,6 +30,7 @@ from api_trafix.models.signage import (
 )
 from api_trafix.models.shifts import Shift, ShiftStatus
 from api_trafix.models.subscription_plans import SubscriptionPlan
+from api_trafix.models.system_config import SystemConfig
 from api_trafix.models.users import User, UserRole, UserStatus
 from api_trafix.models.vehicle_types import VehicleStatus, VehicleType
 
@@ -62,6 +63,7 @@ __all__ = [
     "Shift",
     "ShiftStatus",
     "SubscriptionPlan",
+    "SystemConfig",
     "User",
     "UserRole",
     "UserStatus",

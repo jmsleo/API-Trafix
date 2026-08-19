@@ -13,6 +13,10 @@ from api_trafix.config.settings import get_settings
 router = APIRouter(prefix="/api/gates", tags=["Gate Control"])
 
 
+def _settings(request: Request):
+    return getattr(request.app.state, "settings", None) or get_settings()
+
+
 @router.get("/status")
 async def gates_status(request: Request):
     """All gates: online/offline, last heartbeat, sensor states."""
@@ -54,7 +58,7 @@ async def open_barrier(gate_code: str, request: Request):
 
     registry = request.app.state.device_registry
     bus = request.app.state.bus
-    settings = get_settings()
+    settings = _settings(request)
 
     try:
         controller = registry.controller_for(gate_code)
@@ -103,7 +107,7 @@ async def pulse_relay(gate_code: str, output_id: str, request: Request):
 
     registry = request.app.state.device_registry
     bus = request.app.state.bus
-    settings = get_settings()
+    settings = _settings(request)
 
     try:
         controller = registry.controller_for(gate_code)

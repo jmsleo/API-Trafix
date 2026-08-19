@@ -84,6 +84,7 @@ INPUT_UNKNOWN = "input1"  # never observed active
 # Signage states pushed to the LPR unit.
 STATUS_WELCOME = "welcome"
 STATUS_THANKS = "thanks"
+STATUS_MEMBER_NOT_FOUND = "member_not_found"
 
 # The default relay pulse: 1000 ms on relay1, with a 100 ms beep.
 # Format is [state, duration_ms] (flow.md §8, marked INFERRED).

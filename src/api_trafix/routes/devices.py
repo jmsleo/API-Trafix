@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.config.database import get_db
-from api_trafix.core.dependencies import get_current_admin
+from api_trafix.core.dependencies import get_current_admin_or_teknisi
 from api_trafix.crud import device as crud
 from api_trafix.crud import gate as gate_crud
 from api_trafix.models import User
@@ -37,7 +37,7 @@ async def list_devices(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    _: User = Depends(get_current_admin_or_teknisi),
 ):
     items, total = await crud.get_all(
         db, search=search, device_type=device_type, gate_id=gate_id, page=page, page_size=page_size
@@ -52,7 +52,7 @@ async def list_devices(
 async def get_device(
     device_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_admin),
+    _: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_by_id(db, device_id)
     if db_obj is None:
@@ -65,7 +65,7 @@ async def create_device(
     payload: DeviceCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     await _ensure_gate_exists(db, payload.gate_id)
     db_obj = await crud.create(db, payload)
@@ -87,7 +87,7 @@ async def update_device(
     payload: DeviceUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_by_id(db, device_id)
     if db_obj is None:
@@ -114,7 +114,7 @@ async def delete_device(
     device_id: uuid.UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin_or_teknisi),
 ):
     db_obj = await crud.get_by_id(db, device_id)
     if db_obj is None:

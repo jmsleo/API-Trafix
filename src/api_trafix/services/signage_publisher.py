@@ -15,6 +15,10 @@ Only changed content is re-published (fingerprinted per device+content), so a
 60s periodic sync does not spam the display with duplicates; a full re-publish
 happens once when the API restarts (fresh in-memory state). Deactivated content
 is re-published with an expired date so the display's own cleanup purges it.
+
+The same sync also feeds the web-based display (``SignageDisplayService``, SSE):
+per-gate ads/idle/media lists are pushed on every sync, independent of the MQTT
+brokers, so the Chromium kiosk mirrors what the legacy box plays.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,10 +66,15 @@ class SignagePublisher:
         mirrors: list[MqttBus],
         *,
         base_url: str,
+        display: Any | None = None,
     ) -> None:
         self.primary = primary
         self.mirrors = list(mirrors)
         self.base_url = base_url.rstrip("/")
+        # Web-based display service (SSE). Content aggregated on every sync is
+        # pushed here so the Chromium kiosk shows the same ads/idle/media as
+        # the legacy pw-signage box — independent of the MQTT brokers.
+        self.display = display
         self._published: dict[tuple[str, str], str] = {}
         self._idle_fingerprint: dict[str, str] = {}
         self._sync_lock = asyncio.Lock()
@@ -78,9 +88,11 @@ class SignagePublisher:
     def publish_gate_status(self, gate: str, status: str) -> None:
         """Keep the legacy ``/GATE/IN/N/status`` contract and mirror ``gate/text``."""
         payload = signage(status)
-        self.primary.publish_raw(gate_status_topic(gate), payload)
+        if self.primary.is_connected:
+            self.primary.publish_raw(gate_status_topic(gate), payload)
         for bus in self.buses:
-            bus.publish_raw(DEFAULT_TEXT_TOPIC, payload)
+            if bus.is_connected:
+                bus.publish_raw(DEFAULT_TEXT_TOPIC, payload)
 
     # -- content sync -------------------------------------------------------
 
@@ -114,6 +126,8 @@ class SignagePublisher:
             cfg.get("idle_topic", DEFAULT_IDLE_TOPIC),
         )
         for bus in self.buses:
+            if not bus.is_connected:
+                continue
             if content.content_type == SignageContentType.VIDEO:
                 bus.publish_raw(
                     topics[0],
@@ -156,7 +170,8 @@ class SignagePublisher:
             }
         )
         for bus in self.buses:
-            bus.publish_raw(topic, payload)
+            if bus.is_connected:
+                bus.publish_raw(topic, payload)
 
     async def sync_from_db(self, db: AsyncSession) -> int:
         """Publish assigned active signage content to its display device."""
@@ -164,9 +179,12 @@ class SignagePublisher:
             return await self._sync_locked(db)
 
     async def _sync_locked(self, db: AsyncSession) -> int:
-        if not all(bus.is_connected for bus in self.buses):
-            logger.warning("signage: not all brokers connected, deferring sync")
-            return 0
+        brokers_up = all(bus.is_connected for bus in self.buses)
+        if not brokers_up:
+            logger.warning(
+                "signage: not all brokers connected, MQTT publish deferred "
+                "(web displays still updated)"
+            )
         devices = (
             (
                 await db.execute(
@@ -198,6 +216,8 @@ class SignagePublisher:
 
         first_image: dict[str, SignageContent] = {}
         first_image_device: dict[str, Device] = {}
+        ads_by_gate: dict[str, list[dict]] = {}
+        media_by_gate: dict[str, list[dict]] = {}
         published = 0
 
         for signage_row, content, assignment in rows:
@@ -222,6 +242,35 @@ class SignagePublisher:
                     self._idle_fingerprint.pop(str(device.id), None)
                 continue
 
+            # Aggregate for the web display every sync, regardless of whether
+            # the MQTT fingerprint says the content already went out. Rebuilding
+            # the per-gate lists is what lets the SSE display drop deactivated
+            # content and pick up reordering.
+            start, end = self._window(content)
+            url = self._file_url(content.id)
+            if content.content_type == SignageContentType.VIDEO:
+                media_by_gate.setdefault(gate_number, []).append(
+                    {
+                        "gate_number": gate_number,
+                        "media_type": "video",
+                        "url": url,
+                        "audio_url": "",
+                        "title": content.title,
+                        "start_date": start,
+                        "end_date": end,
+                    }
+                )
+            elif content.content_type == SignageContentType.IMAGE:
+                ads_by_gate.setdefault(gate_number, []).append(
+                    {
+                        "ads_name": content.title,
+                        "image_url": url,
+                        "sound_url": "",
+                        "start_date": start,
+                        "end_date": end,
+                    }
+                )
+
             if self._published.get(key) == fingerprint:
                 continue
 
@@ -240,6 +289,19 @@ class SignagePublisher:
                 continue
             self._publish_idle(device, content, expired=False)
             self._idle_fingerprint[device_id] = fp
+
+        # Push the aggregated content to the web-based displays (SSE). This is
+        # independent of the MQTT brokers — the kiosk connects over HTTP. The
+        # idle background mirrors the legacy behaviour: the first image ad.
+        if self.display is not None:
+            for gate_number in set(ads_by_gate) | set(media_by_gate):
+                ads = ads_by_gate.get(gate_number, [])
+                idle = ads[0] if ads else None
+                await self.display.update_ads(gate_number, ads)
+                await self.display.update_idle(gate_number, idle)
+                await self.display.update_media(
+                    gate_number, media_by_gate.get(gate_number, [])
+                )
 
         if published:
             logger.info("signage: published %d content change(s)", published)
