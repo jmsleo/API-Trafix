@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev && \
+    gcc libpq-dev postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files and readme (needed by pyproject.toml)
