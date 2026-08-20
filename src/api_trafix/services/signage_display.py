@@ -28,6 +28,21 @@ from api_trafix.services.events import publish_system_event
 
 logger = logging.getLogger(__name__)
 
+
+def device_gate(cfg: dict[str, Any] | None, device: Any) -> str:
+    """Gate code a signage device is attached to, or ``""`` when unattached.
+
+    An explicit ``gate_number`` in the device config decides the gate; an
+    explicit empty value marks the screen as a standalone advertising screen
+    (no gate overlay). Only when the key is absent do we fall back to the
+    device's own gate relation.
+    """
+    cfg = cfg or {}
+    if "gate_number" in cfg:
+        value = cfg.get("gate_number")
+        return str(value) if value not in (None, "") else ""
+    return str(getattr(device.gate, "gate_code", None) or "")
+
 # Redis channels for signage
 SIGNAGE_CHANNEL_PREFIX = "signage:"
 SIGNAGE_TEXT_CHANNEL = f"{SIGNAGE_CHANNEL_PREFIX}text"

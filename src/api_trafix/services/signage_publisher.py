@@ -38,6 +38,7 @@ from api_trafix.models import Device, Signage, SignageAssignment, SignageContent
 from api_trafix.models.signage import SignageContentType
 from api_trafix.services.mqtt_bus import MqttBus
 from api_trafix.services.protocol import gate_status_topic, signage
+from api_trafix.services.signage_display import device_gate
 
 logger = logging.getLogger(__name__)
 
@@ -216,8 +217,9 @@ class SignagePublisher:
 
         first_image: dict[str, SignageContent] = {}
         first_image_device: dict[str, Device] = {}
-        ads_by_gate: dict[str, list[dict]] = {}
-        media_by_gate: dict[str, list[dict]] = {}
+        ads_by_screen: dict[str, list[dict]] = {}
+        media_by_screen: dict[str, list[dict]] = {}
+        gate_by_screen: dict[str, str] = {}
         published = 0
 
         for signage_row, content, assignment in rows:
@@ -225,7 +227,10 @@ class SignagePublisher:
             if device is None:
                 continue
             cfg = device.config or {}
-            gate_number = str(cfg.get("gate_number") or getattr(device.gate, "gate_code", None) or "")
+            gate_number = device_gate(cfg, device)
+            screen_key = signage_row.code
+            if gate_number:
+                gate_by_screen[screen_key] = gate_number
             key = (str(device.id), str(content.id))
             active = bool(content.is_active and assignment.is_active)
             fingerprint = (
@@ -249,7 +254,7 @@ class SignagePublisher:
             start, end = self._window(content)
             url = self._file_url(content.id)
             if content.content_type == SignageContentType.VIDEO:
-                media_by_gate.setdefault(gate_number, []).append(
+                media_by_screen.setdefault(screen_key, []).append(
                     {
                         "gate_number": gate_number,
                         "media_type": "video",
@@ -261,7 +266,7 @@ class SignagePublisher:
                     }
                 )
             elif content.content_type == SignageContentType.IMAGE:
-                ads_by_gate.setdefault(gate_number, []).append(
+                ads_by_screen.setdefault(screen_key, []).append(
                     {
                         "ads_name": content.title,
                         "image_url": url,
@@ -293,15 +298,22 @@ class SignagePublisher:
         # Push the aggregated content to the web-based displays (SSE). This is
         # independent of the MQTT brokers — the kiosk connects over HTTP. The
         # idle background mirrors the legacy behaviour: the first image ad.
+        # Content is keyed per screen (signage code) so each display shows its
+        # own playlist; gate-attached screens are also mirrored under the gate
+        # code so gate-keyed displays and monitoring keep working.
         if self.display is not None:
-            for gate_number in set(ads_by_gate) | set(media_by_gate):
-                ads = ads_by_gate.get(gate_number, [])
+            for screen_key in set(ads_by_screen) | set(media_by_screen):
+                ads = ads_by_screen.get(screen_key, [])
                 idle = ads[0] if ads else None
-                await self.display.update_ads(gate_number, ads)
-                await self.display.update_idle(gate_number, idle)
-                await self.display.update_media(
-                    gate_number, media_by_gate.get(gate_number, [])
-                )
+                media = media_by_screen.get(screen_key, [])
+                await self.display.update_ads(screen_key, ads)
+                await self.display.update_idle(screen_key, idle)
+                await self.display.update_media(screen_key, media)
+                gate = gate_by_screen.get(screen_key)
+                if gate:
+                    await self.display.update_ads(gate, ads)
+                    await self.display.update_idle(gate, idle)
+                    await self.display.update_media(gate, media)
 
         if published:
             logger.info("signage: published %d content change(s)", published)

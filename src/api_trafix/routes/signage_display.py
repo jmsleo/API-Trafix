@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from api_trafix.services.signage_display import get_signage_service
+from api_trafix.services.signage_display import get_signage_service, device_gate
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,74 @@ async def _body(request: Request) -> dict[str, Any]:
         return {key: form[key] for key in form}
 
     return {}
+
+
+async def _resolve_screen(key: str) -> dict[str, Any]:
+    """Resolve a stream key (signage code or gate code) to screen info.
+
+    Returns a dict with:
+      - ``key``: the queue key to subscribe to (the gate code for
+        gate-attached screens, otherwise the signage code)
+      - ``screen_key``: signage code of the screen (the key itself if unknown)
+      - ``gate_code``: gate code if the screen is attached to a gate, else None
+      - ``mode``: ``"gate"`` if attached to a gate, else ``"ads"``
+
+    Unknown keys fall back to ``mode="gate"`` so gate-only streams (and the
+    legacy static display page) keep working even without a Device row.
+    """
+    try:
+        from api_trafix.config.database import async_session_maker
+        from api_trafix.models import Device
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        async with async_session_maker() as db:
+            devices = (
+                (
+                    await db.execute(
+                        select(Device)
+                        .where(Device.type.ilike("%signage%"))
+                        .options(selectinload(Device.gate))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            screens: list[tuple[str, str | None]] = []
+            for device in devices:
+                cfg = device.config or {}
+                code = str(cfg.get("signage_code") or device.name)
+                gate = device_gate(cfg, device) or None
+                screens.append((code, gate))
+
+            for code, gate in screens:
+                if code == key:
+                    if gate:
+                        return {
+                            "key": gate,
+                            "screen_key": code,
+                            "gate_code": gate,
+                            "mode": "gate",
+                        }
+                    return {
+                        "key": code,
+                        "screen_key": code,
+                        "gate_code": None,
+                        "mode": "ads",
+                    }
+
+            for code, gate in screens:
+                if gate and gate == key:
+                    return {
+                        "key": gate,
+                        "screen_key": code,
+                        "gate_code": gate,
+                        "mode": "gate",
+                    }
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to resolve signage screen %s", key)
+
+    return {"key": key, "screen_key": key, "gate_code": key, "mode": "gate"}
 
 
 @router.post("/vehicle-detected")
@@ -156,45 +224,55 @@ async def update_signage_status(gate_code: str, request: Request):
     return {"status": "ok", "gate": gate_code, "signage_status": status}
 
 
-@router.get("/stream/{gate_code}")
-async def signage_stream(gate_code: str):
+@router.get("/stream/{key}")
+async def signage_stream(key: str):
     """SSE stream for real-time signage updates.
+
+    The key may be a signage code (``SCR1``) or a gate code (``1``). The
+    stream resolves the screen, announces its mode (``gate`` vs ``ads``) and
+    then pushes status + per-screen ads/idle/media.
 
     The web-based signage display connects to this endpoint
     to receive live updates.
     """
+    info = await _resolve_screen(key)
     service = get_signage_service()
+    subscribe_key = info["key"]
 
     async def event_generator():
-        queue = service.subscribe(gate_code)
+        queue = service.subscribe(subscribe_key)
         try:
+            # Announce the resolved screen/mode first.
+            yield _sse_frame("screen", info)
+
             # Send initial state
-            state = service.get_state(gate_code)
-            yield _sse_frame("status", {
-                "gate": gate_code,
-                "status": state.status,
-                "plate_number": state.plate_number,
-                "transaction_code": state.transaction_code,
-            })
+            state = service.get_state(subscribe_key)
+            if info["mode"] == "gate":
+                yield _sse_frame("status", {
+                    "gate": info["gate_code"],
+                    "status": state.status,
+                    "plate_number": state.plate_number,
+                    "transaction_code": state.transaction_code,
+                })
 
             # Send ads
             if state.ads:
                 yield _sse_frame("ads", {
-                    "gate": gate_code,
+                    "gate": subscribe_key,
                     "ads": state.ads,
                 })
 
             # Send idle image
             if state.idle_image:
                 yield _sse_frame("idle", {
-                    "gate": gate_code,
+                    "gate": subscribe_key,
                     "image": state.idle_image,
                 })
 
             # Send media playlist
             if state.media:
                 yield _sse_frame("media", {
-                    "gate": gate_code,
+                    "gate": subscribe_key,
                     "media": state.media,
                 })
 
@@ -206,7 +284,7 @@ async def signage_stream(gate_code: str):
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
         finally:
-            service.unsubscribe(gate_code, queue)
+            service.unsubscribe(subscribe_key, queue)
 
     return StreamingResponse(
         event_generator(),
