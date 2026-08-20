@@ -71,7 +71,7 @@ class SignageContent(Base):
         nullable=False,
         default=SignageContentType.TEXT,
     )
-    body = Column(Text, nullable=False)
+    body = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     file_path = Column(String(500), nullable=True)
     mime_type = Column(String(100), nullable=True)

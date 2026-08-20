@@ -197,10 +197,6 @@ class SignagePublisher:
             .scalars()
             .all()
         )
-        if not devices:
-            logger.info("signage: no Signage devices configured, skipping sync")
-            return 0
-
         by_code: dict[str, Device] = {}
         for device in devices:
             code = (device.config or {}).get("signage_code") or device.name
@@ -224,27 +220,26 @@ class SignagePublisher:
 
         for signage_row, content, assignment in rows:
             device = by_code.get(signage_row.code)
-            if device is None:
-                continue
-            cfg = device.config or {}
-            gate_number = device_gate(cfg, device)
+            cfg = device.config or {} if device else {}
+            gate_number = device_gate(cfg, device) if device else ""
             screen_key = signage_row.code
             if gate_number:
                 gate_by_screen[screen_key] = gate_number
-            key = (str(device.id), str(content.id))
             active = bool(content.is_active and assignment.is_active)
             fingerprint = (
                 f"{content.updated_at.isoformat()}|{content.is_active}|{assignment.is_active}"
             )
 
             if not active:
-                if key in self._published:
-                    self._publish_content(device, content, gate_number, expired=True)
-                    self._published.pop(key, None)
-                    published += 1
-                if self._idle_fingerprint.get(str(device.id), "").startswith(f"{content.id}|"):
-                    self._publish_idle(device, content, expired=True)
-                    self._idle_fingerprint.pop(str(device.id), None)
+                if device is not None:
+                    key = (str(device.id), str(content.id))
+                    if key in self._published:
+                        self._publish_content(device, content, gate_number, expired=True)
+                        self._published.pop(key, None)
+                        published += 1
+                    if self._idle_fingerprint.get(str(device.id), "").startswith(f"{content.id}|"):
+                        self._publish_idle(device, content, expired=True)
+                        self._idle_fingerprint.pop(str(device.id), None)
                 continue
 
             # Aggregate for the web display every sync, regardless of whether
@@ -276,16 +271,16 @@ class SignagePublisher:
                     }
                 )
 
-            if self._published.get(key) == fingerprint:
-                continue
+            if device is not None:
+                key = (str(device.id), str(content.id))
+                if self._published.get(key) != fingerprint:
+                    self._publish_content(device, content, gate_number, expired=False)
+                    self._published[key] = fingerprint
+                    published += 1
 
-            self._publish_content(device, content, gate_number, expired=False)
-            self._published[key] = fingerprint
-            published += 1
-
-            if content.content_type == SignageContentType.IMAGE:
-                first_image.setdefault(str(device.id), content)
-                first_image_device.setdefault(str(device.id), device)
+                if content.content_type == SignageContentType.IMAGE:
+                    first_image.setdefault(str(device.id), content)
+                    first_image_device.setdefault(str(device.id), device)
 
         for device_id, content in first_image.items():
             device = first_image_device[device_id]

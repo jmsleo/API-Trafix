@@ -111,7 +111,7 @@ class SignageContentStatusUpdate(BaseModel):
 
 class SignageContentRead(SignageContentBase):
     id: UUID
-    body: str = ""
+    body: str | None = ""
     file_path: str | None = None
     mime_type: str | None = None
     file_size_bytes: int | None = None
