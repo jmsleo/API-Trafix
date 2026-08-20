@@ -31,7 +31,17 @@ from api_trafix.core.dependencies import (
     get_active_operator_session,
     get_current_user_query,
 )
-from api_trafix.models import GateEvent, OperatorSession, User, UserRole
+from api_trafix.crud import gate as gate_crud
+from api_trafix.crud import shift as shift_crud
+from api_trafix.crud import vehicle_type as vehicle_type_crud
+from api_trafix.models import (
+    GateEvent,
+    OperatorSession,
+    ShiftStatus,
+    User,
+    UserRole,
+    VehicleStatus,
+)
 from api_trafix.services import gate_cycle as service
 from api_trafix.services.events import (
     GATE_EVENTS_CHANNEL,
@@ -82,6 +92,14 @@ class PosPrintRequest(BaseModel):
 
     transaction_code: str
     gate: str | None = None
+
+
+class PosManualRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    police_number: str
+    vehicle_id: int
+    total: float | None = None
 
 
 # -- payload helpers (mirror the wire response shapes) ------------------------
@@ -150,6 +168,56 @@ async def current_session(
     return operator_session
 
 
+@router.get("/refs")
+async def operator_references(
+    db: AsyncSession = Depends(get_db),
+):
+    """Reference data the POS screen needs (shifts, gates, vehicle classes).
+
+    Public on purpose: the operator login screen fetches it *before* the
+    operator is authenticated, so this endpoint must not require a token.
+    """
+    shifts, _ = await shift_crud.get_all(
+        db, status=ShiftStatus.ACTIVE, page_size=100
+    )
+    gates, _ = await gate_crud.get_all(db, page_size=100)
+    vehicle_types, _ = await vehicle_type_crud.get_all(
+        db, status=VehicleStatus.ACTIVE, page_size=100
+    )
+    return {
+        "shifts": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "start_time": str(s.start_time),
+                "finish_time": str(s.finish_time),
+                "crosses_midnight": s.crosses_midnight,
+                "status": s.status.value,
+            }
+            for s in shifts
+        ],
+        "gates": [
+            {
+                "id": g.id,
+                "name": g.name,
+                "gate_code": g.gate_code,
+                "type": g.type.value,
+                "status": g.status.value,
+            }
+            for g in gates
+        ],
+        "vehicle_types": [
+            {
+                "id": vt.id,
+                "code": vt.code,
+                "name": vt.name,
+                "status": vt.status.value,
+            }
+            for vt in vehicle_types
+        ],
+    }
+
+
 # -- transactions ----------------------------------------------------------
 
 
@@ -211,6 +279,37 @@ async def settle_transaction(
     await publish_gate_event(
         TYPE_TRANSACTION_SETTLED,
         gate=gate,
+        transaction_code=result.transaction_code,
+        total=result.total,
+        operator=operator_session.user_id,
+    )
+    return {"status": "success", "data": _settle_payload(result)}
+
+
+@router.post("/transactions/manual")
+async def manual_transaction(
+    payload: PosManualRequest,
+    request: Request,
+    operator_session: OperatorSession = Depends(get_active_operator_session),
+):
+    """Record a transaction by hand (F9) when the entry ticket never printed.
+
+    The flat rate for the vehicle class is charged and the barrier opens —
+    there is nothing left to settle.
+    """
+    result = await request.app.state.gate_cycle.manual_ticket(
+        police_number=payload.police_number,
+        vehicle_id=payload.vehicle_id,
+        total=payload.total,
+        gate=operator_session.gate.gate_code,
+        exit_operator_id=operator_session.user_id,
+        exit_shift_id=operator_session.shift_id,
+    )
+    if result.status == service.STATUS_NOT_FOUND:
+        return {"status": "notfound", "message": result.message}
+    await publish_gate_event(
+        TYPE_TRANSACTION_SETTLED,
+        gate=operator_session.gate.gate_code,
         transaction_code=result.transaction_code,
         total=result.total,
         operator=operator_session.user_id,
