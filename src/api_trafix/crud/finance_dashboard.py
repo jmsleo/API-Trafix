@@ -3,7 +3,13 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api_trafix.models import ParkingStatus, ParkTransaction, Payment, PaymentStatus
+from api_trafix.models import (
+    ParkingStatus,
+    ParkTransaction,
+    Payment,
+    PaymentStatus,
+    VehicleType,
+)
 
 # ---------------------------------------------------------------------------
 # Timezone helper (WIB = UTC+7)
@@ -101,13 +107,15 @@ async def get_vehicle_distribution(db: AsyncSession) -> dict:
     stmt = (
         select(
             ParkTransaction.vehicle_type_id,
+            VehicleType.name.label("vehicle_type_name"),
             func.count(ParkTransaction.id).label("total_vehicles"),
         )
+        .outerjoin(VehicleType, ParkTransaction.vehicle_type_id == VehicleType.id)
         .where(
             ParkTransaction.entry_time >= start_utc,
             ParkTransaction.entry_time <= end_utc,
         )
-        .group_by(ParkTransaction.vehicle_type_id)
+        .group_by(ParkTransaction.vehicle_type_id, VehicleType.name)
         .order_by(ParkTransaction.vehicle_type_id)
     )
 
@@ -119,6 +127,7 @@ async def get_vehicle_distribution(db: AsyncSession) -> dict:
     distribution = [
         {
             "vehicle_type_id": row.vehicle_type_id,
+            "vehicle_type_name": row.vehicle_type_name or "Unknown",
             "total_vehicles": row.total_vehicles,
             "percentage": round((row.total_vehicles / total_vehicles) * 100, 2)
             if total_vehicles > 0

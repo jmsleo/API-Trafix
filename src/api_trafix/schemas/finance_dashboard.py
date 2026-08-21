@@ -31,6 +31,7 @@ class VehicleDistributionItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     vehicle_type_id: uuid.UUID
+    vehicle_type_name: str | None = None
     total_vehicles: int
     percentage: float  # dalam persen, dibulatkan 2 desimal
 
