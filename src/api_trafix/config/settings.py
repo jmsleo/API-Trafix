@@ -18,6 +18,9 @@ class Settings(BaseSettings):
 
     database_url: str = Field(default="", validation_alias="DATABASE_URL")
     redis_url: str = Field(default="", validation_alias="REDIS_URL")
+    redis_max_connections: int = Field(
+        default=100, validation_alias="REDIS_MAX_CONNECTIONS"
+    )
     redis_session_expire: int = 3600
     redis_cache_expire: int = 300
     subscription_auto_expire_interval_seconds: int = 300

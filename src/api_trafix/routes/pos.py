@@ -428,6 +428,13 @@ async def gate_events_iter(
                 await pubsub.unsubscribe(GATE_EVENTS_CHANNEL)
             except (redis.exceptions.RedisError, OSError):
                 pass
+            try:
+                # unsubscribe() alone does not return the dedicated pubsub
+                # connection to the pool; without aclose() every SSE client
+                # permanently consumes one slot until MaxConnectionsError.
+                await pubsub.aclose()
+            except (redis.exceptions.RedisError, OSError):
+                pass
 
 
 @router.get("/events/stream")

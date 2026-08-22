@@ -372,33 +372,47 @@ async def _monitoring_stream_iter(
         last_push = time.monotonic()
         return _sse_snapshot_frame({"devices": devices, "mqtt": mqtt})
 
-    yield await _push_snapshot()
+    try:
+        yield await _push_snapshot()
 
-    while True:
-        if await request.is_disconnected():
-            break
+        while True:
+            if await request.is_disconnected():
+                break
 
-        if pubsub is None:
-            await asyncio.sleep(_MONITORING_TICK_S)
-            message = None
-        else:
-            try:
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True,
-                    timeout=_MONITORING_TICK_S,
-                )
-            except (redis.exceptions.RedisError, OSError):
+            if pubsub is None:
+                await asyncio.sleep(_MONITORING_TICK_S)
                 message = None
+            else:
+                try:
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True,
+                        timeout=_MONITORING_TICK_S,
+                    )
+                except (redis.exceptions.RedisError, OSError):
+                    message = None
 
-        now = time.monotonic()
-        if message is not None and (now - last_push) >= _MONITORING_MIN_INTERVAL_S:
-            yield await _push_snapshot()
-        elif message is None and (now - last_push) >= _MONITORING_TICK_S:
-            yield await _push_snapshot()
+            now = time.monotonic()
+            if message is not None and (now - last_push) >= _MONITORING_MIN_INTERVAL_S:
+                yield await _push_snapshot()
+            elif message is None and (now - last_push) >= _MONITORING_TICK_S:
+                yield await _push_snapshot()
 
-        if (now - last_keepalive) >= _MONITORING_KEEPALIVE_S:
-            yield ": keepalive\n\n"
-            last_keepalive = now
+            if (now - last_keepalive) >= _MONITORING_KEEPALIVE_S:
+                yield ": keepalive\n\n"
+                last_keepalive = now
+    finally:
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe(GATE_EVENTS_CHANNEL, SYSTEM_EVENTS_CHANNEL)
+            except (redis.exceptions.RedisError, OSError):
+                pass
+            try:
+                # unsubscribe() alone does not return the dedicated pubsub
+                # connection to the pool; without aclose() every SSE client
+                # permanently consumes one slot until MaxConnectionsError.
+                await pubsub.aclose()
+            except (redis.exceptions.RedisError, OSError):
+                pass
 
 
 @router.get("/stream")

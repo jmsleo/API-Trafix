@@ -504,6 +504,7 @@ class FakePubSub:
     def __init__(self, messages: list[dict]):
         self._queue = list(messages)
         self.unsubscribed = False
+        self.closed = False
 
     async def get_message(self, ignore_subscribe_messages=False, timeout=0.0):
         if self._queue:
@@ -512,6 +513,9 @@ class FakePubSub:
 
     async def unsubscribe(self, *channels):
         self.unsubscribed = True
+
+    async def aclose(self):
+        self.closed = True
 
 
 async def test_gate_events_iter_replays_snapshot_and_forwards(pos, monkeypatch):
@@ -578,6 +582,7 @@ async def test_gate_events_iter_unsubscribes_on_exit(pos, monkeypatch):
     ]
     assert any(f.startswith("event: snapshot") for f in frames)
     assert pubsub.unsubscribed
+    assert pubsub.closed
 
 
 async def test_sse_stream_rejects_bad_token(pos):

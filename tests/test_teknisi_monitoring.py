@@ -332,11 +332,22 @@ async def test_monitoring_stream_yields_snapshot(client, db_sessionmaker):
     )
 
     class FakePubSub:
+        def __init__(self):
+            self.unsubscribed = False
+            self.closed = False
+
         async def get_message(self, ignore_subscribe_messages=True, timeout=None):
             return None
 
+        async def unsubscribe(self, *channels):
+            self.unsubscribed = True
+
+        async def aclose(self):
+            self.closed = True
+
+    pubsub = FakePubSub()
     async with db_sessionmaker() as db:
-        gen = monitoring_router._monitoring_stream_iter(request, db, FakePubSub())
+        gen = monitoring_router._monitoring_stream_iter(request, db, pubsub)
         frame = await anext(gen)
         assert frame.startswith("event: snapshot")
         payload = json.loads(frame.split("data: ", 1)[1])
@@ -346,6 +357,11 @@ async def test_monitoring_stream_yields_snapshot(client, db_sessionmaker):
 
         with pytest.raises(StopAsyncIteration):
             await anext(gen)
+
+    # The dedicated pubsub connection must be released back to the pool,
+    # otherwise every SSE client permanently leaks a pool slot.
+    assert pubsub.unsubscribed
+    assert pubsub.closed
 
     await _cleanup(db_sessionmaker, Device, device_id)
     await _cleanup(db_sessionmaker, Gate, gate_id)
