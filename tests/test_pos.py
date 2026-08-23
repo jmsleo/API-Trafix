@@ -10,6 +10,7 @@ Login is username/password only; operator sessions open via
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,6 +23,7 @@ from sqlalchemy import select
 
 from api_trafix.config.database import get_db
 from api_trafix.config.redis import close_redis
+from api_trafix.config.settings import get_settings
 from api_trafix.core.security import create_access_token, hash_password
 from api_trafix.models import (
     Gate,
@@ -39,6 +41,7 @@ from api_trafix.models import (
     User,
     UserRole,
     UserStatus,
+    VehicleStatus,
     VehicleType,
 )
 from api_trafix.routes import auth as auth_routes
@@ -60,6 +63,13 @@ def _plate() -> str:
 
 @pytest_asyncio.fixture
 async def pos(db_sessionmaker, tmp_path):
+    # This file logs in far more than 20x/minute from one client IP; without
+    # raising the per-IP limit the login throttle trips mid-run. The settings
+    # singleton is built on first use (long before this module imports), so
+    # the cache must be dropped after touching the env.
+    os.environ.setdefault("LOGIN_IP_RATE_LIMIT", "1000")
+    get_settings.cache_clear()
+
     async with db_sessionmaker() as db:
         await seed_reference_data(db)
 
@@ -707,3 +717,125 @@ async def test_manual_ticket_charges_the_configured_vehicle_price(pos):
             assert motor is not None
             motor.price = 2000
             await db.commit()
+
+
+# -- admin-defined vehicle classes (vehicle_type_id) ---------------------------
+
+
+async def _custom_vehicle_type(db, *, price=5000, status=VehicleStatus.ACTIVE):
+    """A vehicle class the admin invented — outside the 4-class wire contract."""
+    vt = VehicleType(
+        code=f"GEN{_suffix()[:6].upper()}",
+        name="Kendaraan Khusus",
+        price=price,
+        status=status,
+    )
+    db.add(vt)
+    await db.commit()
+    await db.refresh(vt)
+    return vt
+
+
+async def _cleanup_custom_type(db, type_id, ticket_codes):
+    """Remove rows created by a custom-type test (FK order matters)."""
+    for code in ticket_codes:
+        tx = await db.scalar(
+            select(ParkTransaction).where(ParkTransaction.ticket_number == code)
+        )
+        if tx is not None:
+            await db.delete(tx)
+    vt = await db.get(VehicleType, type_id)
+    if vt is not None:
+        await db.delete(vt)
+    await db.commit()
+
+
+async def test_manual_ticket_accepts_admin_defined_vehicle_type(pos):
+    token, _session, _operator = await _open_session(pos)
+    headers = {"Authorization": f"Bearer {token}"}
+    async with pos.db() as db:
+        vt = await _custom_vehicle_type(db, price=9999)
+        vt_id = vt.id
+
+    codes: list[str] = []
+    try:
+        resp = await pos.client.post(
+            "/api/pos/transactions/manual",
+            json={"police_number": _plate(), "vehicle_type_id": str(vt_id)},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["total"] == 9999
+        assert data["payment_status"] == "lunas"
+        codes.append(data["transaction_code"])
+
+        async with pos.db() as db:
+            tx = await db.scalar(
+                select(ParkTransaction).where(
+                    ParkTransaction.ticket_number == data["transaction_code"]
+                )
+            )
+            assert tx is not None
+            assert str(tx.vehicle_type_id) == str(vt_id)
+    finally:
+        async with pos.db() as db:
+            await _cleanup_custom_type(db, vt_id, codes)
+
+
+async def test_manual_ticket_rejects_unknown_vehicle_type(pos):
+    token, _session, _operator = await _open_session(pos)
+    resp = await pos.client.post(
+        "/api/pos/transactions/manual",
+        json={"police_number": _plate(), "vehicle_type_id": str(uuid.uuid4())},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "notfound"
+
+
+async def test_lost_ticket_prices_an_admin_defined_vehicle_type(pos):
+    token, _session, _operator = await _open_session(pos)
+    async with pos.db() as db:
+        vt = await _custom_vehicle_type(db, price=5000)
+        vt_id = vt.id
+
+    codes: list[str] = []
+    try:
+        resp = await pos.client.post(
+            "/api/pos/transactions/settle",
+            json={
+                "lost_ticket": True,
+                "police_number": _plate(),
+                "vehicle_type_id": str(vt_id),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "success"
+        assert body["data"]["total"] == 5000
+        codes.append(body["data"]["transaction_code"])
+    finally:
+        async with pos.db() as db:
+            await _cleanup_custom_type(db, vt_id, codes)
+
+
+async def test_quote_honors_a_vehicle_type_override(pos):
+    token, _, _ = await _open_session(pos)
+    code = await _enter(pos)
+    async with pos.db() as db:
+        await _backdate(db, code)
+        mobil = await db.scalar(select(VehicleType).where(VehicleType.code == "MOBIL"))
+        mobil_id = mobil.id
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/quote",
+        json={"transaction_code": code, "vehicle_type_id": str(mobil_id)},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    # The motor transaction is repriced at the Mobil flat rate.
+    assert body["data"]["total"] == 4000

@@ -49,6 +49,8 @@ from api_trafix.models import (
     PaymentMethod,
     PaymentStatus,
     RateStatus,
+    VehicleStatus,
+    VehicleType,
 )
 from api_trafix.services import escpos, rates
 from api_trafix.services import vehicles as vehicles_module
@@ -444,10 +446,18 @@ class GateCycleService:
         resolved = await vehicle_type_id(db, vehicle_id)
         if resolved is None:
             return None
+        return await self._rate_for_vehicle_type(db, resolved)
+
+    async def _rate_for_vehicle_type(
+        self, db: AsyncSession, vehicle_type_id: UUID | None
+    ) -> ParkingRate | None:
+        """The active tariff for a vehicle_types UUID, else None."""
+        if vehicle_type_id is None:
+            return None
         return await db.scalar(
             select(ParkingRate)
             .where(
-                ParkingRate.vehicle_type_id == resolved,
+                ParkingRate.vehicle_type_id == vehicle_type_id,
                 ParkingRate.status == RateStatus.ACTIVE,
             )
             .order_by(ParkingRate.created_at.desc())
@@ -904,6 +914,7 @@ class GateCycleService:
         plate: str | None = None,
         lost: bool = False,
         vehicle_id: int | None = None,
+        vehicle_type_id: UUID | None = None,
     ) -> GateOutResult:
         """What would this vehicle pay? Read-only — nothing is written.
 
@@ -922,6 +933,7 @@ class GateCycleService:
                 plate_out=plate,
                 lost=lost,
                 vehicle_id=vehicle_id,
+                vehicle_type_id=vehicle_type_id,
             )
 
     async def quote_gateout_image(self, *, plate: str) -> LprGateOutQuote | None:
@@ -965,12 +977,27 @@ class GateCycleService:
         plate_out: str | None,
         lost: bool = False,
         vehicle_id: int | None = None,
+        vehicle_type_id: UUID | None = None,
     ) -> GateOutResult:
-        # The cashier's vehicle selection wins when given; otherwise the class
-        # recorded at entry decides.
+        # The cashier's selection wins when given (explicit vehicle_type_id
+        # first, then the legacy wire id); otherwise the class recorded at
+        # entry decides.
         entry_vehicle_id = await vehicle_id_of(db, transaction.vehicle_type_id)
-        vehicle_id = vehicle_id or entry_vehicle_id
-        tariff_row = await self._rate_for(db, vehicle_id)
+
+        tariff_row = None
+        flat_tariff = None
+        chosen_wire_id: int | None = None
+        if vehicle_type_id is not None:
+            chosen = await db.get(VehicleType, vehicle_type_id)
+            if chosen is not None:
+                chosen_wire_id = await vehicle_id_of(db, chosen.id)
+                tariff_row = await self._rate_for_vehicle_type(db, chosen.id)
+                if tariff_row is None and chosen.price is not None:
+                    flat_tariff = _flat_tariff_from_price(chosen.price)
+        if tariff_row is None and flat_tariff is None:
+            chosen_wire_id = vehicle_id or entry_vehicle_id
+            tariff_row = await self._rate_for(db, chosen_wire_id)
+
         member = None
         if transaction.police_number:
             member = await find_member_by_plate(db, transaction.police_number)
@@ -978,24 +1005,32 @@ class GateCycleService:
         check_in = transaction.entry_time
         check_out = self.clock()
 
-        if tariff_row is None:
-            log.error("no parking_rates row for vehicle %s", vehicle_id)
-            fee = rates.Fee(0, "0", "no tariff configured")
-        else:
+        if tariff_row is not None:
             fee = rates.calculate(
                 rates.Tariff.from_row(tariff_row),
                 check_in,
                 check_out,
-                vehicle_id=vehicle_id,
+                vehicle_id=chosen_wire_id,
                 member=member,
                 type=rates.TYPE_LOST if lost else rates.TYPE_NORMAL,
             )
+        elif flat_tariff is not None:
+            fee = rates.calculate(
+                flat_tariff,
+                check_in,
+                check_out,
+                member=member,
+                type=rates.TYPE_LOST if lost else rates.TYPE_NORMAL,
+            )
+        else:
+            log.error("no parking_rates row for vehicle %s", chosen_wire_id)
+            fee = rates.Fee(0, "0", "no tariff configured")
 
         plate_in = normalize_plate(transaction.police_number)
         plate_seen = normalize_plate(plate_out)
         match = None if (plate_in is None or plate_seen is None) else plate_in == plate_seen
 
-        is_member = rates.is_active_member(member, vehicle_id)
+        is_member = rates.is_active_member(member, chosen_wire_id)
 
         return GateOutResult(
             status=STATUS_SUCCESS_MEMBER if is_member else STATUS_SUCCESS,
@@ -1013,7 +1048,7 @@ class GateCycleService:
             cam_in=transaction.cam_in,
             cam_out=transaction.cam_out,
             breakdown=fee.breakdown,
-            vehicle_id=vehicle_id,
+            vehicle_id=chosen_wire_id,
             payment_status=transaction.payment_status,
             created_at=format_wib(transaction.created_at),
             updated_at=format_wib(transaction.updated_at),
@@ -1034,6 +1069,7 @@ class GateCycleService:
         exit_shift_id: UUID | None = None,
         lost: bool = False,
         vehicle_id: int | None = None,
+        vehicle_type_id: UUID | None = None,
         open_barrier: bool = True,
     ) -> GateOutResult:
         """Settle a parking session and release the vehicle.
@@ -1075,6 +1111,7 @@ class GateCycleService:
                 plate_out=plate_num,
                 lost=lost,
                 vehicle_id=vehicle_id,
+                vehicle_type_id=vehicle_type_id,
             )
 
             # Optional strictness. Off by default, because on site the plates
@@ -1179,7 +1216,8 @@ class GateCycleService:
         *,
         gate: str,
         plate: str | None,
-        vehicle_id: int | None,
+        vehicle_id: int | None = None,
+        vehicle_type_id: UUID | None = None,
         admin_id: int | None = None,
         shift_id: int | None = None,
         exit_operator_id: UUID | None = None,
@@ -1192,6 +1230,9 @@ class GateCycleService:
         fee (``ticket_charge`` + one parking period) is written straight into
         ``park_transactions``. If the plate still has an open session, that
         session is settled as lost instead of leaving a duplicate behind.
+
+        ``vehicle_type_id`` addresses an admin-managed class directly; the
+        legacy wire ``vehicle_id`` (1-4) still works when no UUID is given.
         """
         plate_norm = normalize_plate(plate)
         if not plate_norm:
@@ -1199,30 +1240,60 @@ class GateCycleService:
                 status=STATUS_NOT_FOUND,
                 message="Nomor plat wajib diisi untuk tiket hilang",
             )
-        if not vehicle_id:
-            return GateOutResult(
-                status=STATUS_NOT_FOUND,
-                message="Jenis kendaraan wajib dipilih untuk tiket hilang",
-            )
 
         async with self.session_factory() as session:
-            tariff_row = await self._rate_for(session, vehicle_id)
-            if tariff_row is None:
-                log.error(
-                    "lost ticket: no parking_rates row for vehicle %s", vehicle_id
-                )
-                return GateOutResult(
-                    status=STATUS_NOT_FOUND,
-                    message="Tarif kendaraan tidak ditemukan",
-                )
+            vehicle_type_uuid: UUID | None = None
+            tariff_row = None
+            flat_tariff = None
+
+            if vehicle_type_id is not None:
+                chosen = await session.get(VehicleType, vehicle_type_id)
+                if chosen is None or chosen.status != VehicleStatus.ACTIVE:
+                    return GateOutResult(
+                        status=STATUS_NOT_FOUND,
+                        message="Jenis kendaraan tidak ditemukan atau nonaktif",
+                    )
+                vehicle_type_uuid = chosen.id
+                tariff_row = await self._rate_for_vehicle_type(session, chosen.id)
+                if tariff_row is None:
+                    if chosen.price is None:
+                        return GateOutResult(
+                            status=STATUS_NOT_FOUND,
+                            message="Harga jenis kendaraan belum diatur",
+                        )
+                    flat_tariff = _flat_tariff_from_price(chosen.price)
+            else:
+                if not vehicle_id:
+                    return GateOutResult(
+                        status=STATUS_NOT_FOUND,
+                        message="Jenis kendaraan wajib dipilih untuk tiket hilang",
+                    )
+                tariff_row = await self._rate_for(session, vehicle_id)
+                if tariff_row is None:
+                    log.error(
+                        "lost ticket: no parking_rates row for vehicle %s", vehicle_id
+                    )
+                    return GateOutResult(
+                        status=STATUS_NOT_FOUND,
+                        message="Tarif kendaraan tidak ditemukan",
+                    )
+                vehicle_type_uuid = await _coerce_vehicle(session, vehicle_id)
 
             now = self.clock()
             now_str = format_wib(now)
+            tariff = (
+                rates.Tariff.from_row(tariff_row) if tariff_row is not None else flat_tariff
+            )
             fee = rates.calculate(
-                rates.Tariff.from_row(tariff_row),
+                tariff,
                 now,
                 now,
                 type=rates.TYPE_LOST,
+            )
+            result_vehicle_id = (
+                vehicle_id
+                if vehicle_type_uuid is None
+                else await vehicle_id_of(session, vehicle_type_uuid)
             )
 
             open_tx = await session.scalar(
@@ -1245,7 +1316,7 @@ class GateCycleService:
                 open_tx.paid_at = now
                 open_tx.exit_gate_id = gate_id
                 open_tx.status_parking = ParkingStatus.COMPLETED
-                open_tx.vehicle_type_id = await _coerce_vehicle(session, vehicle_id)
+                open_tx.vehicle_type_id = vehicle_type_uuid
                 open_tx.keterangan = "tiket hilang"
                 open_tx.exit_operator_id = exit_operator_id or None
                 open_tx.exit_shift_id = exit_shift_id or None
@@ -1257,7 +1328,7 @@ class GateCycleService:
                         ticket_number=code,
                         entry_time=now,
                         exit_time=now,
-                        vehicle_type_id=await _coerce_vehicle(session, vehicle_id),
+                        vehicle_type_id=vehicle_type_uuid,
                         police_number=plate_norm,
                         total_fee=int(fee.total),
                         duration=fee.duration,
@@ -1302,7 +1373,7 @@ class GateCycleService:
             plate_out=plate_norm,
             plate_match=True,
             breakdown=fee.breakdown,
-            vehicle_id=vehicle_id,
+            vehicle_id=result_vehicle_id,
             admin_id=admin_id,
             shift_id=shift_id,
             payment_status="lunas",
@@ -1316,7 +1387,8 @@ class GateCycleService:
         self,
         *,
         police_number: str,
-        vehicle_id: int,
+        vehicle_id: int | None = None,
+        vehicle_type_id: UUID | None = None,
         admin_id: int | None = None,
         shift_id: int | None = None,
         exit_operator_id: UUID | None = None,
@@ -1328,9 +1400,11 @@ class GateCycleService:
 
         The cashier types only the plate and the vehicle class; the code is
         generated here, check-in / check-out / duration are ``now``, and the
-        flat rate for the class (motor Rp2.000, mobil Rp4.000, ojol/paket
-        Rp0, bus besar Rp6.000) is charged and marked lunas immediately —
-        there is nothing left to settle.
+        class's configured flat price is charged and marked lunas immediately
+        — there is nothing left to settle.
+
+        ``vehicle_type_id`` addresses an admin-managed class directly; the
+        legacy wire ``vehicle_id`` (1-4) still works when no UUID is given.
         """
         plate = normalize_plate(police_number)
         if not plate:
@@ -1338,32 +1412,68 @@ class GateCycleService:
                 status=STATUS_NOT_FOUND,
                 message="Nomor plat wajib diisi untuk input manual",
             )
-        if vehicle_id not in (1, 2, 3, 4):
+        if vehicle_type_id is None and vehicle_id not in (1, 2, 3, 4):
             return GateOutResult(
                 status=STATUS_NOT_FOUND,
                 message="Jenis kendaraan wajib dipilih (motor, mobil, ojol/paket, atau bus besar)",
             )
 
-        charge = (
-            total
-            if total is not None
-            else {1: 2000, 2: 4000, 3: 0, 4: 6000}[vehicle_id]
-        )
         duration = rates.format_duration(
             rates.elapsed(self.clock(), self.clock())
         )
 
         async with self.session_factory() as session:
+            if vehicle_type_id is not None:
+                chosen = await session.get(VehicleType, vehicle_type_id)
+                if chosen is None or chosen.status != VehicleStatus.ACTIVE:
+                    return GateOutResult(
+                        status=STATUS_NOT_FOUND,
+                        message="Jenis kendaraan tidak ditemukan atau nonaktif",
+                    )
+                vehicle_type_uuid: UUID | None = chosen.id
+            else:
+                vehicle_type_uuid = await _coerce_vehicle(session, vehicle_id)
+
             now = self.clock()
             now_str = format_wib(now)
+
+            charge = total
+            if charge is None:
+                # The admin-configured flat price wins; fall back to the
+                # class's rate table, then to the legacy seed prices for the
+                # four wired classes.
+                vehicle_type = (
+                    await session.get(VehicleType, vehicle_type_uuid)
+                    if vehicle_type_uuid is not None
+                    else None
+                )
+                configured = vehicle_type.price if vehicle_type else None
+                if configured is None:
+                    rate_row = await self._rate_for_vehicle_type(session, vehicle_type_uuid)
+                    configured = rate_row.base_price if rate_row else None
+                if configured is not None:
+                    charge = configured
+                elif vehicle_type_uuid is not None:
+                    return GateOutResult(
+                        status=STATUS_NOT_FOUND,
+                        message="Harga jenis kendaraan belum diatur",
+                    )
+                else:
+                    charge = {1: 2000, 2: 4000, 3: 0, 4: 6000}[vehicle_id]
+
             code = await self.generate_transaction_code(session)
             gate_id = await gate_uuid(session, gate)
+            result_vehicle_id = (
+                vehicle_id
+                if vehicle_type_uuid is None
+                else await vehicle_id_of(session, vehicle_type_uuid)
+            )
 
             transaction = ParkTransaction(
                 ticket_number=code,
                 entry_time=now,
                 exit_time=now,
-                vehicle_type_id=await _coerce_vehicle(session, vehicle_id),
+                vehicle_type_id=vehicle_type_uuid,
                 police_number=plate,
                 total_fee=int(charge),
                 duration=duration,
@@ -1397,7 +1507,7 @@ class GateCycleService:
             "manual ticket %s: plate %s, vehicle %s, charged %s",
             code,
             plate,
-            vehicle_id,
+            result_vehicle_id,
             charge,
         )
         return GateOutResult(
@@ -1409,7 +1519,7 @@ class GateCycleService:
             plate_out=plate,
             plate_match=True,
             breakdown=f"manual input, flat {int(charge)}",
-            vehicle_id=vehicle_id,
+            vehicle_id=result_vehicle_id,
             admin_id=admin_id,
             shift_id=shift_id,
             payment_status="lunas",
@@ -1829,6 +1939,26 @@ async def _coerce_vehicle(
     from api_trafix.services.vehicles import coerce_vehicle_type_id
 
     return await coerce_vehicle_type_id(db, vehicle_id)
+
+
+def _flat_tariff_from_price(price: float) -> rates.Tariff:
+    """A synthetic Flat tariff charging exactly ``price``.
+
+    Used when a class the admin created has no parking_rates row: the flat
+    price *is* the tariff (ticket_charge 0 so a lost ticket also costs just
+    the configured price).
+    """
+    return rates.Tariff(
+        fee_category=rates.FEE_FLAT,
+        grace_periode=0,
+        fee_first_time=0,
+        fee_first_price=float(price),
+        fee_time_1=0,
+        fee_price_1=0,
+        fee_price_max=0,
+        ticket_charge=0,
+        stay_charge=0,
+    )
 
 
 async def _gate_codes(db: AsyncSession) -> dict[UUID, str]:

@@ -17,6 +17,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import UUID
 
 import redis.exceptions
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -43,6 +44,7 @@ from api_trafix.models import (
     VehicleStatus,
 )
 from api_trafix.services import gate_cycle as service
+from api_trafix.services.vehicles import vehicle_id_of
 from api_trafix.services.events import (
     GATE_EVENTS_CHANNEL,
     TYPE_TRANSACTION_SETTLED,
@@ -78,6 +80,8 @@ class PosSettleRequest(BaseModel):
     police_number: str | None = None
     lost_ticket: bool = False
     vehicle_id: int | None = None
+    # An admin-managed vehicle class (wins over the legacy wire id).
+    vehicle_type_id: UUID | None = None
 
 
 class PosVoidRequest(BaseModel):
@@ -98,7 +102,9 @@ class PosManualRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     police_number: str
-    vehicle_id: int
+    vehicle_id: int | None = None
+    # An admin-managed vehicle class (wins over the legacy wire id).
+    vehicle_type_id: UUID | None = None
     total: float | None = None
 
 
@@ -211,6 +217,11 @@ async def operator_references(
                 "id": vt.id,
                 "code": vt.code,
                 "name": vt.name,
+                # Flat manual-ticket price (may be null when not configured).
+                "price": vt.price,
+                # The gate-cycle wire id (1-4) the POS hotkeys address, or
+                # None for classes outside the wire contract.
+                "wire_id": await vehicle_id_of(db, vt.id),
                 "status": vt.status.value,
             }
             for vt in vehicle_types
@@ -233,6 +244,7 @@ async def quote_transaction(
         plate=payload.police_number,
         lost=payload.lost_ticket,
         vehicle_id=payload.vehicle_id,
+        vehicle_type_id=payload.vehicle_type_id,
     )
     if result.status == service.STATUS_NOT_FOUND:
         return {
@@ -257,6 +269,7 @@ async def settle_transaction(
             gate=gate,
             plate=payload.police_number,
             vehicle_id=payload.vehicle_id,
+            vehicle_type_id=payload.vehicle_type_id,
             exit_operator_id=operator_session.user_id,
             exit_shift_id=operator_session.shift_id,
         )
@@ -267,6 +280,7 @@ async def settle_transaction(
             plate_num=payload.police_number,
             lost=payload.lost_ticket,
             vehicle_id=payload.vehicle_id,
+            vehicle_type_id=payload.vehicle_type_id,
             exit_operator_id=operator_session.user_id,
             exit_shift_id=operator_session.shift_id,
         )
@@ -300,6 +314,7 @@ async def manual_transaction(
     result = await request.app.state.gate_cycle.manual_ticket(
         police_number=payload.police_number,
         vehicle_id=payload.vehicle_id,
+        vehicle_type_id=payload.vehicle_type_id,
         total=payload.total,
         gate=operator_session.gate.gate_code,
         exit_operator_id=operator_session.user_id,
