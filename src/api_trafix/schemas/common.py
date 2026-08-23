@@ -5,6 +5,8 @@ from pydantic import BeforeValidator, EmailStr, Field, StringConstraints
 
 NonNegativeInt = Annotated[int, Field(ge=0)]
 PositiveInt = Annotated[int, Field(ge=1)]
+# Rupiah amounts: non-negative integers without decimals or separators.
+RupiahPrice = Annotated[int, Field(ge=0, le=1_000_000_000)]
 
 Name = Annotated[str, StringConstraints(min_length=1, max_length=100, strip_whitespace=True)]
 ShortName = Annotated[str, StringConstraints(min_length=1, max_length=50, strip_whitespace=True)]

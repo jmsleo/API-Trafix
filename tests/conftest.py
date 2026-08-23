@@ -37,10 +37,19 @@ MIGRATION_FEE_FIELDS_SQL = os.path.join(
     "2026_08_14_gate_cycle_fee_fields.sql",
 )
 
+MIGRATION_VEHICLE_PRICE_SQL = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "migrations",
+    "2026_08_23_vehicle_type_price.sql",
+)
+
 with open(MIGRATION_SQL, encoding="utf-8") as _handle:
     MIGRATION_STATEMENTS = _handle.read()
 
 with open(MIGRATION_FEE_FIELDS_SQL, encoding="utf-8") as _handle:
+    MIGRATION_STATEMENTS += "\n" + _handle.read()
+
+with open(MIGRATION_VEHICLE_PRICE_SQL, encoding="utf-8") as _handle:
     MIGRATION_STATEMENTS += "\n" + _handle.read()
 
 

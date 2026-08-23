@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from api_trafix.models.vehicle_types import VehicleStatus
-from api_trafix.schemas.common import Code, Name
+from api_trafix.schemas.common import Code, Name, RupiahPrice
 
 
 class VehicleTypeBase(BaseModel):
@@ -12,6 +12,7 @@ class VehicleTypeBase(BaseModel):
 
     code: Code
     name: Name
+    price: RupiahPrice | None = None
     status: VehicleStatus
 
 
@@ -24,6 +25,7 @@ class VehicleTypeUpdate(BaseModel):
 
     code: Code | None = None
     name: Name | None = None
+    price: RupiahPrice | None = None
     status: VehicleStatus | None = None
 
 
