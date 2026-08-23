@@ -9,6 +9,8 @@ from api_trafix.models import (
     Gate,
     Member,
     MemberSubscription,
+    OperatorSession,
+    OperatorShiftAssignment,
     ParkingRate,
     SubscriptionPlan,
     User,
@@ -102,6 +104,10 @@ async def test_seed_is_idempotent(db_sessionmaker):
 
 
 async def _clear_users(db) -> None:
+    # Sessions/assignments hard-reference users (no cascade), so clear them
+    # first — stale rows from earlier runs would block the delete otherwise.
+    await db.execute(delete(OperatorSession))
+    await db.execute(delete(OperatorShiftAssignment))
     await db.execute(delete(User))
     await db.commit()
 

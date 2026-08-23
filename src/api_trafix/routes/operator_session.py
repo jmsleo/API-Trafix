@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.config.database import get_db
@@ -13,7 +14,7 @@ from api_trafix.core.dependencies import (
 from api_trafix.crud import gate as gate_crud
 from api_trafix.crud import operator_session as crud
 from api_trafix.crud import shift as shift_crud
-from api_trafix.models import OperatorSessionStatus, User, UserRole
+from api_trafix.models import Gate, GateType, OperatorSessionStatus, User, UserRole
 from api_trafix.services.audit import log_action
 from api_trafix.schemas.operator_session import (
     OperatorSessionPage,
@@ -49,6 +50,44 @@ async def list_operator_sessions(
     )
 
 
+async def _resolve_exit_gate(db: AsyncSession, gate_id: uuid.UUID | None) -> Gate:
+    """Resolve the gate a cashier session is bound to.
+
+    Operators serve the exit gate only (gate-in is fully automatic), so an
+    omitted ``gate_id`` resolves THE configured exit gate. Exactly one
+    gate_out must exist — ambiguity would risk opening the wrong barrier.
+    An explicit ``gate_id`` stays supported (deploy rollout, tests) but must
+    also be a gate_out.
+    """
+    if gate_id is not None:
+        gate = await gate_crud.get_by_id(db, gate_id)
+        if gate is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
+        if gate.type != GateType.GATE_OUT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Operator sessions can only be opened at a gate keluar",
+            )
+        return gate
+
+    exits = (
+        (await db.execute(select(Gate).where(Gate.type == GateType.GATE_OUT).order_by(Gate.gate_code)))
+        .scalars()
+        .all()
+    )
+    if len(exits) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Belum ada gate keluar yang dikonfigurasi",
+        )
+    if len(exits) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Harus ada tepat satu gate keluar; hapus atau ubah gate keluar lainnya",
+        )
+    return exits[0]
+
+
 @router.post(
     "/start",
     response_model=OperatorSessionRead,
@@ -63,9 +102,7 @@ async def start_operator_session(
     if shift is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
 
-    gate = await gate_crud.get_by_id(db, payload.gate_id)
-    if gate is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
+    gate = await _resolve_exit_gate(db, payload.gate_id)
 
     active = await crud.get_active_for_operator(db, operator.id)
     if active is not None:
@@ -74,7 +111,7 @@ async def start_operator_session(
             detail="Operator already has an active session",
         )
 
-    db_obj = await crud.start(db, payload, operator)
+    db_obj = await crud.start(db, payload, operator, gate)
     await log_action(
         db,
         module="operator-session",

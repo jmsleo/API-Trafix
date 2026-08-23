@@ -25,6 +25,8 @@ from api_trafix.config.redis import close_redis
 from api_trafix.core.security import create_access_token, hash_password
 from api_trafix.models import (
     Gate,
+    GateStatus,
+    GateType,
     OperatorSession,
     OperatorShiftAssignment,
     OperatorShiftAssignmentStatus,
@@ -37,6 +39,7 @@ from api_trafix.models import (
     User,
     UserRole,
     UserStatus,
+    VehicleType,
 )
 from api_trafix.routes import auth as auth_routes
 from api_trafix.routes import gate_cycle as gate_routes
@@ -154,10 +157,13 @@ async def _login(pos, operator):
     )
 
 
-async def _start_session(pos, token, shift_id, gate_id):
+async def _start_session(pos, token, shift_id, gate_id=None):
+    payload = {"shift_id": str(shift_id)}
+    if gate_id is not None:
+        payload["gate_id"] = str(gate_id)
     return await pos.client.post(
         "/operator-sessions/start",
-        json={"shift_id": str(shift_id), "gate_id": str(gate_id)},
+        json=payload,
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -262,11 +268,10 @@ async def test_session_start_rejects_non_operator(pos):
     async with pos.db() as db:
         admin = await _create_operator(db, role=UserRole.ADMIN)
         shift = await _create_shift(db)
-        gate = await _gate(db)
-        shift_id, gate_id = shift.id, gate.id
+        shift_id = shift.id
     login_resp = await _login(pos, admin)
     token = login_resp.json()["access_token"]
-    resp = await _start_session(pos, token, shift_id, gate_id)
+    resp = await _start_session(pos, token, shift_id)
     assert resp.status_code == 403
 
 
@@ -284,16 +289,17 @@ async def test_session_start_opens_session_for_operator(pos):
     async with pos.db() as db:
         operator = await _create_operator(db)
         shift = await _create_shift(db)
-        gate = await _gate(db)
-        shift_id, gate_id = shift.id, gate.id
+        exit_gate = await _gate(db, "2")
+        shift_id = shift.id
     login_resp = await _login(pos, operator)
     token = login_resp.json()["access_token"]
-    resp = await _start_session(pos, token, shift_id, gate_id)
+    # No gate_id: the backend must resolve the single exit gate itself.
+    resp = await _start_session(pos, token, shift_id)
     assert resp.status_code == 201
     session = resp.json()
     assert session["status"] == "active"
     assert session["shift_id"] == str(shift_id)
-    assert session["gate_id"] == str(gate_id)
+    assert session["gate_id"] == str(exit_gate.id)
 
     async with pos.db() as db:
         active = await db.scalar(
@@ -302,14 +308,56 @@ async def test_session_start_opens_session_for_operator(pos):
         assert active is not None and active.status.value == "active"
 
 
+async def test_session_start_rejects_entry_gate(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift(db)
+        entry_gate = await _gate(db, "1")
+        shift_id, entry_id = shift.id, entry_gate.id
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await _start_session(pos, token, shift_id, entry_id)
+    assert resp.status_code == 400
+
+
+async def test_session_start_requires_exactly_one_exit_gate(pos):
+    extra_exit_id = None
+    try:
+        async with pos.db() as db:
+            operator = await _create_operator(db)
+            shift = await _create_shift(db)
+            suffix = _suffix()
+            extra = Gate(
+                name=f"Extra Exit {suffix}",
+                gate_code=f"{suffix[:4]}X",
+                type=GateType.GATE_OUT,
+                status=GateStatus.ONLINE,
+            )
+            db.add(extra)
+            await db.commit()
+            await db.refresh(extra)
+            extra_exit_id = extra.id
+            shift_id = shift.id
+        login_resp = await _login(pos, operator)
+        token = login_resp.json()["access_token"]
+        resp = await _start_session(pos, token, shift_id)
+        assert resp.status_code == 422
+    finally:
+        if extra_exit_id is not None:
+            async with pos.db() as db:
+                extra = await db.get(Gate, extra_exit_id)
+                if extra is not None:
+                    await db.delete(extra)
+                    await db.commit()
+
+
 async def test_second_session_start_conflicts(pos):
     token, _, operator = await _open_session(pos)
     async with pos.db() as db:
         shift = await _create_shift(db)
         await _assign(db, operator, shift)
-        gate = await _gate(db, "1")
-        shift_id, gate_id = shift.id, gate.id
-    resp = await _start_session(pos, token, shift_id, gate_id)
+        shift_id = shift.id
+    resp = await _start_session(pos, token, shift_id)
     assert resp.status_code == 409
     assert token
 
@@ -590,3 +638,72 @@ async def test_sse_stream_rejects_bad_token(pos):
         "GET", "/api/pos/events/stream?token=not-a-token"
     ) as resp:
         assert resp.status_code == 401
+
+
+async def test_pos_refs_expose_price_and_wire_id(pos):
+    """The operator app joins hotkeys to prices via wire_id."""
+    resp = await pos.client.get("/api/pos/refs")
+    assert resp.status_code == 200
+
+    types = {vt["code"]: vt for vt in resp.json()["vehicle_types"]}
+    assert set(types) >= {"MOTOR", "MOBIL", "OJOL", "BUS"}
+    assert types["MOTOR"]["wire_id"] == 1
+    assert types["MOBIL"]["wire_id"] == 2
+    assert types["OJOL"]["wire_id"] == 3
+    assert types["BUS"]["wire_id"] == 4
+    assert types["MOTOR"]["price"] == 2000
+    assert types["MOBIL"]["price"] == 4000
+    assert types["OJOL"]["price"] == 0
+    assert types["BUS"]["price"] == 6000
+
+
+async def test_manual_ticket_charges_the_configured_vehicle_price(pos):
+    token, _session, _operator = await _open_session(pos)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # The admin edits the Mobil price; the manual ticket must follow it.
+    async with pos.db() as db:
+        mobil = await db.scalar(select(VehicleType).where(VehicleType.code == "MOBIL"))
+        assert mobil is not None
+        mobil.price = 7777
+        await db.commit()
+
+    try:
+        resp = await pos.client.post(
+            "/api/pos/transactions/manual",
+            json={"police_number": _plate(), "vehicle_id": 2},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["total"] == 7777
+        assert data["payment_status"] == "lunas"
+    finally:
+        # Restore the seed price — the test DB is shared across the suite.
+        async with pos.db() as db:
+            mobil = await db.scalar(select(VehicleType).where(VehicleType.code == "MOBIL"))
+            assert mobil is not None
+            mobil.price = 4000
+            await db.commit()
+
+    # A class with no configured price falls back to the legacy flat rate.
+    async with pos.db() as db:
+        motor = await db.scalar(select(VehicleType).where(VehicleType.code == "MOTOR"))
+        assert motor is not None
+        motor.price = None
+        await db.commit()
+
+    try:
+        resp = await pos.client.post(
+            "/api/pos/transactions/manual",
+            json={"police_number": _plate(), "vehicle_id": 1},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["total"] == 2000
+    finally:
+        async with pos.db() as db:
+            motor = await db.scalar(select(VehicleType).where(VehicleType.code == "MOTOR"))
+            assert motor is not None
+            motor.price = 2000
+            await db.commit()

@@ -13,6 +13,7 @@ class GateBrief(BaseModel):
 
     id: UUID
     name: str
+    gate_code: str
     type: GateType
     status: GateStatus
 
@@ -21,7 +22,9 @@ class OperatorSessionStart(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     shift_id: UUID
-    gate_id: UUID
+    # Optional: when omitted the backend resolves the single configured exit
+    # gate automatically — operators serve gate-out only.
+    gate_id: UUID | None = None
 
 
 class OperatorSessionRead(BaseModel):

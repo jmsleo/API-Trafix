@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from api_trafix.models.gates import Gate
 from api_trafix.models.operator_sessions import OperatorSession, OperatorSessionStatus
 from api_trafix.models.users import User
 from api_trafix.schemas.operator_session import OperatorSessionStart
@@ -77,12 +78,13 @@ async def get_active_for_operator(
 
 
 async def start(
-    db: AsyncSession, payload: OperatorSessionStart, operator: User
+    db: AsyncSession, payload: OperatorSessionStart, operator: User, gate: Gate
 ) -> OperatorSession:
+    """Open a session. ``gate`` is the exit gate resolved by the route."""
     db_obj = OperatorSession(
         user_id=operator.id,
         shift_id=payload.shift_id,
-        gate_id=payload.gate_id,
+        gate_id=gate.id,
         login_time=datetime.now(timezone.utc),
         status=OperatorSessionStatus.ACTIVE,
     )
