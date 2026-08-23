@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     login_lockout_seconds: int = 900
     login_ip_rate_limit: int = 20
 
+    # Bootstrap admin account, seeded at startup only while no user exists.
+    # Change ADMIN_PASSWORD in production; the default is for fresh installs.
+    admin_name: str = Field(default="Administrator", validation_alias="ADMIN_NAME")
+    admin_username: str = Field(default="admin", validation_alias="ADMIN_USERNAME")
+    admin_password: str = Field(default="admin123", validation_alias="ADMIN_PASSWORD")
+
     max_request_size_mb: int = 1
 
     backup_dir: str = Field(default="backups", validation_alias="BACKUP_DIR")

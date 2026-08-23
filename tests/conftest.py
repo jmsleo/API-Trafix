@@ -10,7 +10,7 @@ is valid against the current models.
 from __future__ import annotations
 
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 import asyncpg
 import pytest_asyncio
@@ -47,8 +47,8 @@ with open(MIGRATION_FEE_FIELDS_SQL, encoding="utf-8") as _handle:
 def _pg_params() -> dict:
     parsed = urlparse(TEST_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1))
     return {
-        "user": parsed.username,
-        "password": parsed.password,
+        "user": unquote(parsed.username or ""),
+        "password": unquote(parsed.password or ""),
         "host": parsed.hostname or "localhost",
         "port": parsed.port or 5432,
         "database": parsed.path.lstrip("/"),

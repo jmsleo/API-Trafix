@@ -10,7 +10,10 @@ modern API-Trafix schema:
 * one flat parking rate per class, including the lost-ticket and overnight
   stay fees that are printed on every ticket footer,
 * a demo member (Angelo / H4818AI / RFID 006343040) so member auto-entry can
-  be exercised end to end.
+  be exercised end to end,
+* a bootstrap admin login (ADMIN_USERNAME / ADMIN_PASSWORD, default
+  ``admin`` / ``admin123``) so the /users API can be used at all — it is only
+  created while the users table is empty.
 
 Every insert is guarded by an existence check, so running the seeder on a
 populated database (or twice) is a no-op.
@@ -21,9 +24,11 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api_trafix.config.settings import get_settings
+from api_trafix.core.security import hash_password
 from api_trafix.models import (
     Gate,
     GateStatus,
@@ -35,6 +40,9 @@ from api_trafix.models import (
     ParkingRate,
     RateStatus,
     SubscriptionPlan,
+    User,
+    UserRole,
+    UserStatus,
     VehicleStatus,
     VehicleType,
 )
@@ -130,10 +138,15 @@ async def seed_reference_data(db: AsyncSession) -> None:
                 VehicleType(
                     code=vehicle["code"],
                     name=vehicle["name"],
+                    price=RATES[vehicle["code"]]["base_price"],
                     status=VehicleStatus.ACTIVE,
                 )
             )
             created_types += 1
+        elif vehicle_type.price is None:
+            # Backfill rows predating vehicle_types.price so the operator
+            # screen shows the familiar flat rates without the SQL migration.
+            vehicle_type.price = RATES[vehicle["code"]]["base_price"]
 
     await db.flush()
 
@@ -167,15 +180,47 @@ async def seed_reference_data(db: AsyncSession) -> None:
             created_rates += 1
 
     created_member = await _seed_demo_member(db)
+    created_admin = await _seed_bootstrap_admin(db)
 
     await db.commit()
     logger.info(
-        "reference data seeded (gates=%d, vehicle_types=%d, rates=%d, member=%d)",
+        "reference data seeded (gates=%d, vehicle_types=%d, rates=%d, member=%d, admin=%d)",
         created_gates,
         created_types,
         created_rates,
         created_member,
+        created_admin,
     )
+
+
+async def _seed_bootstrap_admin(db: AsyncSession) -> int:
+    """Create the first admin login so /users is reachable at all.
+
+    Only runs while the users table is empty: once any account exists the
+    admins manage accounts through the API and the seeder stays out of the
+    way. Returns 1 when a new admin was created, else 0.
+    """
+    user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
+    if user_count > 0:
+        return 0
+
+    settings = get_settings()
+    if settings.admin_password == "admin123":
+        logger.warning(
+            "creating bootstrap admin '%s' with the DEFAULT password; "
+            "set ADMIN_PASSWORD in .env before going live",
+            settings.admin_username,
+        )
+    db.add(
+        User(
+            name=settings.admin_name,
+            username=settings.admin_username,
+            password=hash_password(settings.admin_password),
+            role=UserRole.ADMIN,
+            status=UserStatus.ACTIVE,
+        )
+    )
+    return 1
 
 
 async def _seed_demo_member(db: AsyncSession) -> int:

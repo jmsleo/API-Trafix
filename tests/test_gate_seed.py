@@ -1,14 +1,19 @@
 """Idempotency and value tests for the reference-data seeder."""
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
+from api_trafix.config.settings import get_settings
+from api_trafix.core.security import hash_password, verify_password
 from api_trafix.models import (
     Gate,
     Member,
     MemberSubscription,
     ParkingRate,
     SubscriptionPlan,
+    User,
+    UserRole,
+    UserStatus,
     VehicleType,
 )
 from api_trafix.services.seed import (
@@ -48,6 +53,8 @@ async def test_seed_creates_reference_data(db_sessionmaker):
             for vehicle in (await db.scalars(select(VehicleType))).all()
         }
         assert set(vehicle_types) == {"MOTOR", "MOBIL", "OJOL", "BUS"}
+        for code, vehicle in vehicle_types.items():
+            assert vehicle.price == RATES[code]["base_price"]
 
         rates = (await db.scalars(select(ParkingRate))).all()
         for rate in rates:
@@ -92,3 +99,41 @@ async def test_seed_is_idempotent(db_sessionmaker):
         assert await _count(db, ParkingRate) == RATE_COUNT
         assert await _count(db, Member) == 1
         assert await _count(db, SubscriptionPlan) == 1
+
+
+async def _clear_users(db) -> None:
+    await db.execute(delete(User))
+    await db.commit()
+
+
+async def test_seed_creates_bootstrap_admin(db_sessionmaker):
+    async with db_sessionmaker() as db:
+        await _clear_users(db)
+        await seed_reference_data(db)
+
+        admin = await db.scalar(select(User).where(User.role == UserRole.ADMIN))
+        assert admin is not None
+        assert admin.username == get_settings().admin_username
+        assert admin.name == get_settings().admin_name
+        assert admin.status == UserStatus.ACTIVE
+        assert verify_password(get_settings().admin_password, admin.password)
+
+
+async def test_bootstrap_admin_skipped_when_users_exist(db_sessionmaker):
+    async with db_sessionmaker() as db:
+        await _clear_users(db)
+        db.add(
+            User(
+                name="Root",
+                username="root",
+                password=hash_password("irrelevant"),
+                role=UserRole.ADMIN,
+                status=UserStatus.ACTIVE,
+            )
+        )
+        await db.commit()
+
+        await seed_reference_data(db)
+
+        users = (await db.scalars(select(User))).all()
+        assert [user.username for user in users] == ["root"]
