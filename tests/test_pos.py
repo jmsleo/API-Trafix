@@ -839,3 +839,117 @@ async def test_quote_honors_a_vehicle_type_override(pos):
     assert body["status"] == "success"
     # The motor transaction is repriced at the Mobil flat rate.
     assert body["data"]["total"] == 4000
+
+
+# -- fee previews (quote without an open transaction) --------------------------
+
+
+async def test_quote_previews_a_manual_ticket_fee(pos):
+    token, _session, _operator = await _open_session(pos)
+    async with pos.db() as db:
+        vt = await _custom_vehicle_type(db, price=9999)
+        vt_id = vt.id
+    try:
+        resp = await pos.client.post(
+            "/api/pos/transactions/quote",
+            json={
+                "manual": True,
+                "police_number": _plate(),
+                "vehicle_type_id": str(vt_id),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "success"
+        assert body["data"]["total"] == 9999
+
+        # Previews never write.
+        async with pos.db() as db:
+            count = len(
+                (
+                    await db.scalars(select(ParkTransaction))
+                ).all()
+            )
+        resp_again = await pos.client.post(
+            "/api/pos/transactions/quote",
+            json={
+                "manual": True,
+                "police_number": _plate(),
+                "vehicle_type_id": str(vt_id),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp_again.status_code == 200
+        async with pos.db() as db:
+            assert len((await db.scalars(select(ParkTransaction))).all()) == count
+    finally:
+        async with pos.db() as db:
+            await _cleanup_custom_type(db, vt_id, [])
+
+
+async def test_quote_previews_lost_fees(pos):
+    token, _session, _operator = await _open_session(pos)
+
+    # A class with only a flat price charges exactly that price.
+    async with pos.db() as db:
+        vt = await _custom_vehicle_type(db, price=5000)
+        flat_id = vt.id
+
+    codes: list[str] = []
+    try:
+        resp = await pos.client.post(
+            "/api/pos/transactions/quote",
+            json={
+                "lost_ticket": True,
+                "police_number": _plate(),
+                "vehicle_type_id": str(flat_id),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "success"
+        assert body["data"]["total"] == 5000
+    finally:
+        async with pos.db() as db:
+            await _cleanup_custom_type(db, flat_id, codes)
+
+    # A rate-table class charges ticket_charge + one parking period.
+    async with pos.db() as db:
+        motor = await db.scalar(select(VehicleType).where(VehicleType.code == "MOTOR"))
+        motor_id = motor.id
+        from api_trafix.models import ParkingRate, RateStatus
+
+        rate = await db.scalar(
+            select(ParkingRate).where(
+                ParkingRate.vehicle_type_id == motor_id,
+                ParkingRate.status == RateStatus.ACTIVE,
+            )
+        )
+        expected = int(rate.ticket_charge + rate.base_price)
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/quote",
+        json={
+            "lost_ticket": True,
+            "police_number": _plate(),
+            "vehicle_type_id": str(motor_id),
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["data"]["total"] == expected
+
+
+async def test_quote_without_transaction_and_flags_still_notfound(pos):
+    token, _session, _operator = await _open_session(pos)
+    resp = await pos.client.post(
+        "/api/pos/transactions/quote",
+        json={"police_number": _plate()},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "notfound"

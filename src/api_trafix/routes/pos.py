@@ -82,6 +82,8 @@ class PosSettleRequest(BaseModel):
     vehicle_id: int | None = None
     # An admin-managed vehicle class (wins over the legacy wire id).
     vehicle_type_id: UUID | None = None
+    # Quote-only: price a manual ticket even though no transaction exists yet.
+    manual: bool = False
 
 
 class PosVoidRequest(BaseModel):
@@ -239,13 +241,30 @@ async def quote_transaction(
     _: OperatorSession = Depends(get_active_operator_session),
 ):
     """What would this vehicle pay? Read-only — nothing is written."""
-    result = await request.app.state.gate_cycle.quote(
-        code=payload.transaction_code,
-        plate=payload.police_number,
-        lost=payload.lost_ticket,
-        vehicle_id=payload.vehicle_id,
-        vehicle_type_id=payload.vehicle_type_id,
-    )
+    if payload.manual:
+        # A manual ticket has no recorded entry by definition — price it
+        # directly instead of looking for a transaction behind the plate.
+        result = await request.app.state.gate_cycle.preview_fee(
+            kind="manual",
+            vehicle_type_id=payload.vehicle_type_id,
+            vehicle_id=payload.vehicle_id,
+        )
+    else:
+        result = await request.app.state.gate_cycle.quote(
+            code=payload.transaction_code,
+            plate=payload.police_number,
+            lost=payload.lost_ticket,
+            vehicle_id=payload.vehicle_id,
+            vehicle_type_id=payload.vehicle_type_id,
+        )
+        if result.status == service.STATUS_NOT_FOUND and payload.lost_ticket:
+            # No open transaction behind this plate — for lost tickets that
+            # is expected, so answer with the would-be charge instead.
+            result = await request.app.state.gate_cycle.preview_fee(
+                kind="lost",
+                vehicle_type_id=payload.vehicle_type_id,
+                vehicle_id=payload.vehicle_id,
+            )
     if result.status == service.STATUS_NOT_FOUND:
         return {
             "status": "notfound",
