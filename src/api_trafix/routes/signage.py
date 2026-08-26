@@ -80,6 +80,7 @@ async def list_signages(
 
 @router.post("/", response_model=SignageRead, status_code=status.HTTP_201_CREATED)
 async def create_signage(
+    request: Request,
     payload: SignageCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_or_teknisi),
@@ -90,6 +91,7 @@ async def create_signage(
     db_obj = await crud.create_signage(db, payload)
     await log_action(db, module="signage", action="create", user_id=current_user.id,
                      role=current_user.role.value, description=f"Created signage '{db_obj.name}' ({db_obj.code})")
+    asyncio.create_task(_trigger_signage_sync(request))
     return db_obj
 
 
@@ -255,6 +257,7 @@ async def get_content_file(content_id: uuid.UUID, db: AsyncSession = Depends(get
 
 @router.delete("/contents/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_content(
+    request: Request,
     content_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_or_teknisi),
@@ -271,6 +274,7 @@ async def delete_content(
                      role=current_user.role.value, description=f"Deleted signage content '{db_obj.title}'")
     await crud.delete_content(db, db_obj)
     media_service.delete_content_file(db_obj)
+    asyncio.create_task(_trigger_signage_sync(request))
     return None
 
 
@@ -519,6 +523,7 @@ async def update_signage(
 
 @router.patch("/{signage_id}/status", response_model=SignageRead)
 async def update_signage_status(
+    request: Request,
     signage_id: uuid.UUID,
     payload: SignageStatusUpdate,
     db: AsyncSession = Depends(get_db),
@@ -530,11 +535,13 @@ async def update_signage_status(
     db_obj = await crud.update_signage(db, db_obj, payload)
     await log_action(db, module="signage", action="update-status", user_id=current_user.id,
                      role=current_user.role.value, description=f"Changed signage '{db_obj.name}' status to {db_obj.status.value}")
+    asyncio.create_task(_trigger_signage_sync(request))
     return db_obj
 
 
 @router.delete("/{signage_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_signage(
+    request: Request,
     signage_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_or_teknisi),
@@ -550,4 +557,5 @@ async def delete_signage(
     await log_action(db, module="signage", action="delete", user_id=current_user.id,
                      role=current_user.role.value, description=f"Deleted signage '{db_obj.name}' ({db_obj.code})")
     await crud.delete_signage(db, db_obj)
+    asyncio.create_task(_trigger_signage_sync(request))
     return None
