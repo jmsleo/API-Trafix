@@ -1,11 +1,12 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import exists, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api_trafix.models.member_subscriptions import MemberSubscription, STATUS_ACTIVE
+from api_trafix.models.member_subscriptions import STATUS_ACTIVE, MemberSubscription
 from api_trafix.models.member_vehicles import MemberVehicle
 from api_trafix.models.members import Member, MemberStatus
 from api_trafix.models.subscription_plans import SubscriptionPlan
@@ -46,6 +47,7 @@ async def get_all(
         )
         condition = or_(
             Member.member_code.ilike(like),
+            Member.card_number.ilike(like),
             Member.name.ilike(like),
             vehicle_match,
         )
@@ -56,11 +58,7 @@ async def get_all(
         count_stmt = count_stmt.where(Member.status == status)
 
     total = (await db.execute(count_stmt)).scalar_one()
-    stmt = (
-        stmt.order_by(Member.name)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
+    stmt = stmt.order_by(Member.name).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
     return list(result.scalars().all()), total
 
@@ -90,12 +88,24 @@ async def get_by_card_number(db: AsyncSession, card_number: str) -> Member | Non
     return result.scalar_one_or_none()
 
 
+async def card_number_exists(
+    db: AsyncSession, card_number: str, *, exclude_id: uuid.UUID | None = None
+) -> bool:
+    stmt = select(Member.id).where(Member.card_number == card_number).limit(1)
+    if exclude_id is not None:
+        stmt = stmt.where(Member.id != exclude_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+
 async def create(
     db: AsyncSession,
     payload: MemberCreate,
     plan: SubscriptionPlan | None = None,
 ) -> Member:
-    member_data = payload.model_dump(exclude={"police_number", "vehicle_type_id", "plan_id"})
+    member_data = payload.model_dump(
+        exclude={"police_number", "vehicle_type_id", "plan_id"}
+    )
     for _ in range(5):
         db_obj = Member(**member_data, member_code=await _unique_member_code(db))
         db.add(db_obj)
@@ -113,7 +123,7 @@ async def create(
                 )
             )
         if plan is not None:
-            start_date = datetime.now(timezone.utc)
+            start_date = datetime.now(UTC)
             db.add(
                 MemberSubscription(
                     member_id=db_obj.id,

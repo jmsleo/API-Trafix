@@ -2,12 +2,20 @@ from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    StringConstraints,
+    model_validator,
+)
 
 from api_trafix.models.members import MemberStatus
 from api_trafix.schemas.common import Email, Name, PhoneNumber
 
-MemberCode = Annotated[str, StringConstraints(min_length=3, max_length=50, strip_whitespace=True)]
+MemberCode = Annotated[
+    str, StringConstraints(min_length=3, max_length=50, strip_whitespace=True)
+]
 
 
 def _normalize_plate(value: Any) -> Any:
@@ -26,6 +34,25 @@ VehiclePlate = Annotated[
         pattern=r"^[A-Za-z0-9 .-]+$",
     ),
 ]
+
+
+def _normalize_card(value: Any) -> Any:
+    # RFID card numbers keep their significant leading zeros ("0006248873"),
+    # so the value must stay a string and never pass through int coercion.
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+CardNumber = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=20, pattern=r"^\d*$"),
+]
+
+# Wraps the whole union (not just the str branch) so blank input normalizes to
+# None before the union is resolved instead of failing validation.
+MemberCardField = Annotated[CardNumber | None, BeforeValidator(_normalize_card)]
 
 
 class MemberBrief(BaseModel):
@@ -54,6 +81,7 @@ class MemberBase(BaseModel):
     name: Name
     email: Email | None = None
     phone_number: PhoneNumber | None = None
+    card_number: MemberCardField = None
     status: MemberStatus
     created_by: UUID | None = None
 
@@ -64,6 +92,7 @@ class MemberCreate(BaseModel):
     name: Name
     email: Email | None = None
     phone_number: PhoneNumber | None = None
+    card_number: MemberCardField = None
     status: MemberStatus
     created_by: UUID | None = None
     police_number: VehiclePlate | None = None
@@ -73,7 +102,9 @@ class MemberCreate(BaseModel):
     @model_validator(mode="after")
     def _vehicle_fields_together(self):
         if (self.police_number is None) != (self.vehicle_type_id is None):
-            raise ValueError("police_number and vehicle_type_id must be provided together")
+            raise ValueError(
+                "police_number and vehicle_type_id must be provided together"
+            )
         return self
 
 
@@ -83,6 +114,7 @@ class MemberUpdate(BaseModel):
     name: Name | None = None
     email: Email | None = None
     phone_number: PhoneNumber | None = None
+    card_number: MemberCardField = None
     status: MemberStatus | None = None
     created_by: UUID | None = None
 

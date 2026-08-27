@@ -1,4 +1,5 @@
 import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +29,11 @@ async def list_members(
     )
     total_pages = (total + page_size - 1) // page_size
     return MemberPage(
-        items=items, total=total, page=page, page_size=page_size, total_pages=total_pages
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
     )
 
 
@@ -40,7 +45,9 @@ async def get_member(
 ):
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
+        )
     return db_obj
 
 
@@ -66,6 +73,12 @@ async def create_member(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Police number already registered",
             )
+
+    if await crud.card_number_exists(db, payload.card_number):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Card number already registered",
+        )
 
     plan = None
     if payload.plan_id is not None:
@@ -95,7 +108,12 @@ async def create_member(
         role=current_user.role.value,
         description=(
             f"Registered member '{db_obj.name}' ({db_obj.member_code})"
-            + (f" with vehicle '{payload.police_number}'" if payload.police_number else "")
+            + (
+                f" with vehicle '{payload.police_number}'"
+                if payload.police_number
+                else ""
+            )
+            + (f" with card '{payload.card_number}'" if payload.card_number else "")
             + (f" subscribed to plan '{plan.name}'" if plan is not None else "")
         ),
     )
@@ -111,7 +129,18 @@ async def update_member(
 ):
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
+        )
+    if (
+        payload.card_number is not None
+        and payload.card_number != db_obj.card_number
+        and await crud.card_number_exists(db, payload.card_number, exclude_id=db_obj.id)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Card number already registered",
+        )
     db_obj = await crud.update(db, db_obj, payload)
     await log_action(
         db,
@@ -119,7 +148,16 @@ async def update_member(
         action="update",
         user_id=current_user.id,
         role=current_user.role.value,
-        description=f"Updated member '{db_obj.name}' ({db_obj.member_code})",
+        description=(
+            f"Updated member '{db_obj.name}' ({db_obj.member_code})"
+            + (
+                f" card set to '{payload.card_number}'"
+                if payload.card_number
+                else " card cleared"
+                if "card_number" in payload.model_dump(exclude_unset=True)
+                else ""
+            )
+        ),
     )
     return db_obj
 
@@ -132,7 +170,9 @@ async def block_member(
 ):
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
+        )
     db_obj = await crud.block(db, db_obj)
     await log_action(
         db,
@@ -153,7 +193,9 @@ async def delete_member(
 ):
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
+        )
     await log_action(
         db,
         module="member",
@@ -163,4 +205,3 @@ async def delete_member(
         description=f"Deleted member '{db_obj.name}' ({db_obj.member_code})",
     )
     await crud.delete(db, db_obj)
-    return None

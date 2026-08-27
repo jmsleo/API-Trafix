@@ -241,7 +241,16 @@ async def lifespan(app: FastAPI):
     background_task = asyncio.create_task(run_periodic_tasks(signage=signage_publisher))
     daily_backup_task = asyncio.create_task(run_daily_backup_loop())
     audit_cleanup_task = asyncio.create_task(run_weekly_audit_cleanup_loop())
+    # Defer orchestrator dependency checks until the server is actually
+    # serving — avoids self-referencing deadlock during lifespan startup.
+    dep_check_task: asyncio.Task | None = None
+    if orchestrator is not None:
+        dep_check_task = asyncio.create_task(orchestrator.check_dependencies_later())
     yield
+    if dep_check_task is not None:
+        dep_check_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await dep_check_task
     background_task.cancel()
     daily_backup_task.cancel()
     audit_cleanup_task.cancel()

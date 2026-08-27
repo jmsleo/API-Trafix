@@ -183,6 +183,15 @@ class Orchestrator:
                 )
 
         await self.bus.start()
+
+    async def check_dependencies_later(self) -> None:
+        """Run dependency checks after the lifespan has yielded.
+
+        Called from main.py as a background task so the HTTP health check
+        does not deadlock the startup (the server must be serving before
+        it can reach itself).
+        """
+        await asyncio.sleep(2)
         await self._check_dependencies()
 
     async def stop(self) -> None:
