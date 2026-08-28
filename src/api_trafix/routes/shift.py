@@ -38,7 +38,7 @@ async def get_shift(
 ):
     db_obj = await crud.get_by_id(db, shift_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan")
     return db_obj
 
 
@@ -50,7 +50,7 @@ async def create_shift(
 ):
     existing = await crud.get_by_name(db, payload.name)
     if existing is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name already exists")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan")
     db_obj = await crud.create(db, payload)
     await log_action(
         db,
@@ -72,12 +72,12 @@ async def update_shift(
 ):
     db_obj = await crud.get_by_id(db, shift_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan")
 
     if payload.name and payload.name != db_obj.name:
         existing = await crud.get_by_name(db, payload.name)
         if existing is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Name already exists")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan")
 
     db_obj = await crud.update(db, db_obj, payload)
     await log_action(
@@ -99,7 +99,7 @@ async def delete_shift(
 ):
     db_obj = await crud.get_by_id(db, shift_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan")
     await log_action(
         db,
         module="shift",

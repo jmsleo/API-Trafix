@@ -36,13 +36,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 INVALID_CREDENTIALS = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Invalid username or password",
+    detail="Username atau password salah",
     headers={"WWW-Authenticate": "Bearer"},
 )
 
 INVALID_REFRESH = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Invalid or expired refresh token",
+    detail="Token refresh tidak valid atau sudah kedaluwarsa",
     headers={"WWW-Authenticate": "Bearer"},
 )
 
@@ -84,7 +84,7 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
     if user.status.value != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is inactive",
+            detail="Akun tidak aktif",
         )
 
     await clear_login_throttle(data.username)

@@ -87,7 +87,7 @@ async def create_signage(
 ):
     existing = await crud.get_signage_by_code(db, payload.code)
     if existing is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code already exists")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kode sudah digunakan")
     db_obj = await crud.create_signage(db, payload)
     await log_action(db, module="signage", action="create", user_id=current_user.id,
                      role=current_user.role.value, description=f"Created signage '{db_obj.name}' ({db_obj.code})")
@@ -114,7 +114,7 @@ async def list_contents(
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid content_type, must be one of {[t.value for t in SignageContentType]}",
+                detail=f"content_type tidak valid, harus salah satu dari {[t.value for t in SignageContentType]}",
             )
     items, total = await crud.get_all_contents(
         db, search=search, content_type=type_filter, is_active=is_active, page=page, page_size=page_size
@@ -128,7 +128,7 @@ async def list_contents(
 async def get_content(content_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten signage tidak ditemukan")
     return db_obj
 
 
@@ -156,7 +156,7 @@ async def update_content(
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten signage tidak ditemukan")
     db_obj = await crud.update_content(db, db_obj, payload)
     await log_action(db, module="signage", action="update-content", user_id=current_user.id,
                      role=current_user.role.value, description=f"Updated signage content '{db_obj.title}'")
@@ -174,7 +174,7 @@ async def update_content_status(
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten signage tidak ditemukan")
     db_obj = await crud.update_content(db, db_obj, payload)
     await log_action(db, module="signage", action="update-content-status", user_id=current_user.id,
                      role=current_user.role.value,
@@ -197,7 +197,7 @@ async def upload_content(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid content_type, must be one of {[t.value for t in SignageContentType]}",
+            detail=f"content_type tidak valid, harus salah satu dari {[t.value for t in SignageContentType]}",
         )
 
     try:
@@ -216,12 +216,12 @@ async def upload_content(
         if total > max_bytes:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"File exceeds limit of {get_settings().signage_upload_max_mb} MB",
+                detail=f"File melebihi batas {get_settings().signage_upload_max_mb} MB",
             )
         chunks.append(chunk)
 
     if total == 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File yang diunggah kosong")
 
     stored_name = media_service.save_upload(type_filter, mime, b"".join(chunks), file.filename)
     db_obj = await crud.create_media_content(
@@ -243,15 +243,15 @@ async def upload_content(
 async def get_content_file(content_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten signage tidak ditemukan")
     if db_obj.file_path is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Content has no media file")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten tidak memiliki file media")
     try:
         path = media_service.resolve_content_file(db_obj)
     except media_service.SignageMediaError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if not path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media file not found on disk")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File media tidak ditemukan pada disk")
     return FileResponse(path, media_type=db_obj.mime_type or "application/octet-stream", filename=path.name)
 
 
@@ -264,11 +264,11 @@ async def delete_content(
 ):
     db_obj = await crud.get_content(db, content_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten signage tidak ditemukan")
     if await crud.is_content_in_use(db, content_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Content is in use by assignments or schedules",
+            detail="Konten sedang digunakan oleh penugasan atau jadwal",
         )
     await log_action(db, module="signage", action="delete-content", user_id=current_user.id,
                      role=current_user.role.value, description=f"Deleted signage content '{db_obj.title}'")
@@ -307,7 +307,7 @@ async def list_assignments(
 async def get_assignment(assignment_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     db_obj = await crud.get_assignment(db, assignment_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Penugasan tidak ditemukan")
     return db_obj
 
 
@@ -320,22 +320,22 @@ async def create_assignment(
 ):
     signage = await crud.get_signage(db, payload.signage_id)
     if signage is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage tidak ditemukan")
     content = await crud.get_content(db, payload.content_id)
     if content is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten signage tidak ditemukan")
     existing = await crud.get_assignment_by_pair(db, payload.signage_id, payload.content_id)
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This content is already assigned to the signage",
+            detail="Konten ini sudah ditugaskan ke signage",
         )
     try:
         db_obj = await crud.create_assignment(db, payload)
     except IntegrityError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This content is already assigned to the signage",
+            detail="Konten ini sudah ditugaskan ke signage",
         )
     await log_action(db, module="signage", action="create-assignment", user_id=current_user.id,
                      role=current_user.role.value,
@@ -354,7 +354,7 @@ async def update_assignment_status(
 ):
     db_obj = await crud.get_assignment(db, assignment_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Penugasan tidak ditemukan")
     db_obj = await crud.update_assignment(db, db_obj, payload)
     await log_action(db, module="signage", action="update-assignment-status", user_id=current_user.id,
                      role=current_user.role.value,
@@ -372,7 +372,7 @@ async def delete_assignment(
 ):
     db_obj = await crud.get_assignment(db, assignment_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Penugasan tidak ditemukan")
     await log_action(db, module="signage", action="delete-assignment", user_id=current_user.id,
                      role=current_user.role.value,
                      description=f"Deleted signage assignment (signage '{db_obj.signage.name}', content '{db_obj.content.title}')")
@@ -410,7 +410,7 @@ async def list_schedules(
 async def get_schedule(schedule_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jadwal tidak ditemukan")
     return db_obj
 
 
@@ -422,10 +422,10 @@ async def create_schedule(
 ):
     signage = await crud.get_signage(db, payload.signage_id)
     if signage is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage tidak ditemukan")
     content = await crud.get_content(db, payload.content_id)
     if content is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten signage tidak ditemukan")
     db_obj = await crud.create_schedule(db, payload)
     await log_action(db, module="signage", action="create-schedule", user_id=current_user.id,
                      role=current_user.role.value,
@@ -442,15 +442,15 @@ async def update_schedule(
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jadwal tidak ditemukan")
     if payload.signage_id is not None:
         signage = await crud.get_signage(db, payload.signage_id)
         if signage is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage tidak ditemukan")
     if payload.content_id is not None:
         content = await crud.get_content(db, payload.content_id)
         if content is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage content not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Konten signage tidak ditemukan")
     db_obj = await crud.update_schedule(db, db_obj, payload)
     await log_action(db, module="signage", action="update-schedule", user_id=current_user.id,
                      role=current_user.role.value, description=f"Updated signage schedule for content '{db_obj.content.title}'")
@@ -466,7 +466,7 @@ async def update_schedule_status(
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jadwal tidak ditemukan")
     db_obj = await crud.update_schedule(db, db_obj, payload)
     await log_action(db, module="signage", action="update-schedule-status", user_id=current_user.id,
                      role=current_user.role.value,
@@ -482,7 +482,7 @@ async def delete_schedule(
 ):
     db_obj = await crud.get_schedule(db, schedule_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schedule not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jadwal tidak ditemukan")
     await log_action(db, module="signage", action="delete-schedule", user_id=current_user.id,
                      role=current_user.role.value,
                      description=f"Deleted signage schedule for content '{db_obj.content.title}'")
@@ -497,7 +497,7 @@ async def delete_schedule(
 async def get_signage(signage_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage tidak ditemukan")
     return db_obj
 
 
@@ -510,11 +510,11 @@ async def update_signage(
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage tidak ditemukan")
     if payload.code and payload.code != db_obj.code:
         existing = await crud.get_signage_by_code(db, payload.code)
         if existing is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code already exists")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kode sudah digunakan")
     db_obj = await crud.update_signage(db, db_obj, payload)
     await log_action(db, module="signage", action="update", user_id=current_user.id,
                      role=current_user.role.value, description=f"Updated signage '{db_obj.name}' ({db_obj.code})")
@@ -531,7 +531,7 @@ async def update_signage_status(
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage tidak ditemukan")
     db_obj = await crud.update_signage(db, db_obj, payload)
     await log_action(db, module="signage", action="update-status", user_id=current_user.id,
                      role=current_user.role.value, description=f"Changed signage '{db_obj.name}' status to {db_obj.status.value}")
@@ -548,11 +548,11 @@ async def delete_signage(
 ):
     db_obj = await crud.get_signage(db, signage_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signage tidak ditemukan")
     if await crud.is_signage_in_use(db, signage_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Signage is in use by assignments or schedules",
+            detail="Signage sedang digunakan oleh penugasan atau jadwal",
         )
     await log_action(db, module="signage", action="delete", user_id=current_user.id,
                      role=current_user.role.value, description=f"Deleted signage '{db_obj.name}' ({db_obj.code})")

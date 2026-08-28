@@ -62,11 +62,11 @@ async def _resolve_exit_gate(db: AsyncSession, gate_id: uuid.UUID | None) -> Gat
     if gate_id is not None:
         gate = await gate_crud.get_by_id(db, gate_id)
         if gate is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gerbang tidak ditemukan")
         if gate.type != GateType.GATE_OUT:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Operator sessions can only be opened at a gate keluar",
+                detail="Sesi operator hanya dapat dibuka di gerbang keluar",
             )
         return gate
 
@@ -100,7 +100,7 @@ async def start_operator_session(
 ):
     shift = await shift_crud.get_by_id(db, payload.shift_id)
     if shift is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan")
 
     gate = await _resolve_exit_gate(db, payload.gate_id)
 
@@ -108,7 +108,7 @@ async def start_operator_session(
     if active is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Operator already has an active session",
+            detail="Operator sudah memiliki sesi aktif",
         )
 
     db_obj = await crud.start(db, payload, operator, gate)
@@ -132,16 +132,16 @@ async def end_operator_session(
     db_obj = await crud.get_by_id(db, session_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Operator session not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Sesi operator tidak ditemukan"
         )
     if db_obj.status == OperatorSessionStatus.CLOSED:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Session already closed"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Sesi sudah ditutup"
         )
     if current_user.role != UserRole.ADMIN and db_obj.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not allowed to close this session",
+            detail="Tidak diizinkan menutup sesi ini",
         )
     db_obj = await crud.end(db, db_obj)
     await log_action(
@@ -160,6 +160,6 @@ async def get_operator_session(session_id: uuid.UUID, db: AsyncSession = Depends
     db_obj = await crud.get_by_id(db, session_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Operator session not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Sesi operator tidak ditemukan"
         )
     return db_obj

@@ -44,7 +44,7 @@ async def get_vehicle_type(
 ):
     db_obj = await crud.get_by_id(db, vehicle_type_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle type not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jenis kendaraan tidak ditemukan")
     return db_obj
 
 
@@ -56,7 +56,7 @@ async def create_vehicle_type(
 ):
     existing = await crud.get_by_code(db, payload.code)
     if existing is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code already exists")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kode sudah digunakan")
     db_obj = await crud.create(db, payload)
     await log_action(
         db,
@@ -78,12 +78,12 @@ async def update_vehicle_type(
 ):
     db_obj = await crud.get_by_id(db, vehicle_type_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle type not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jenis kendaraan tidak ditemukan")
 
     if payload.code and payload.code != db_obj.code:
         existing = await crud.get_by_code(db, payload.code)
         if existing is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code already exists")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kode sudah digunakan")
 
     db_obj = await crud.update(db, db_obj, payload)
     await log_action(
@@ -105,11 +105,11 @@ async def delete_vehicle_type(
 ):
     db_obj = await crud.get_by_id(db, vehicle_type_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle type not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jenis kendaraan tidak ditemukan")
     if await crud.is_in_use(db, vehicle_type_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Vehicle type is used by parking rates or member vehicles",
+            detail="Jenis kendaraan digunakan oleh tarif parkir atau kendaraan member",
         )
     await log_action(
         db,

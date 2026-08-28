@@ -65,7 +65,7 @@ async def _operator_query_user(
     if current_user.role != UserRole.OPERATOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient permissions",
+            detail="Hak akses tidak mencukupi",
         )
     return current_user
 

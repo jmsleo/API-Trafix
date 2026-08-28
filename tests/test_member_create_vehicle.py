@@ -163,7 +163,7 @@ async def test_create_member_with_inactive_vehicle_type(client, db_sessionmaker)
         },
     )
     assert resp.status_code == 400
-    assert "not active" in resp.json()["detail"].lower()
+    assert "tidak aktif" in resp.json()["detail"].lower()
 
 
 async def test_create_member_with_duplicate_police_number(client, db_sessionmaker):
@@ -191,7 +191,7 @@ async def test_create_member_with_duplicate_police_number(client, db_sessionmake
         },
     )
     assert second.status_code == 400
-    assert "already registered" in second.json()["detail"].lower()
+    assert "sudah terdaftar" in second.json()["detail"].lower()
 
 
 async def test_create_member_with_only_police_number(client, db_sessionmaker):

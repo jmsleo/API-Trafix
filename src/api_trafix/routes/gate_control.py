@@ -30,7 +30,7 @@ async def gate_status(gate_code: str, request: Request):
     gate_health = request.app.state.gate_health
     entry = gate_health.get_one(gate_code)
     if entry is None:
-        raise HTTPException(status_code=404, detail=f"Gate {gate_code} not found")
+        raise HTTPException(status_code=404, detail=f"Gerbang {gate_code} tidak ditemukan")
     return entry
 
 
@@ -40,7 +40,7 @@ async def gate_sensors(gate_code: str, request: Request):
     gate_health = request.app.state.gate_health
     entry = gate_health.get_one(gate_code)
     if entry is None:
-        raise HTTPException(status_code=404, detail=f"Gate {gate_code} not found")
+        raise HTTPException(status_code=404, detail=f"Gerbang {gate_code} tidak ditemukan")
     return {
         "gate_code": gate_code,
         "sensors": entry["sensor_states"],
@@ -64,7 +64,7 @@ async def open_barrier(gate_code: str, request: Request):
         controller = registry.controller_for(gate_code)
     except RegistryError:
         raise HTTPException(
-            status_code=404, detail=f"No controller configured for gate {gate_code}"
+            status_code=404, detail=f"Tidak ada kontroller yang dikonfigurasi untuk gerbang {gate_code}"
         )
 
     # MQTT command
@@ -113,7 +113,7 @@ async def pulse_relay(gate_code: str, output_id: str, request: Request):
         controller = registry.controller_for(gate_code)
     except RegistryError:
         raise HTTPException(
-            status_code=404, detail=f"No controller configured for gate {gate_code}"
+            status_code=404, detail=f"Tidak ada kontroller yang dikonfigurasi untuk gerbang {gate_code}"
         )
 
     # MQTT command

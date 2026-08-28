@@ -45,7 +45,7 @@ async def get_parking_rate(
 ):
     db_obj = await crud.get_by_id(db, parking_rate_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parking rate not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarif parkir tidak ditemukan")
     return db_obj
 
 
@@ -58,14 +58,14 @@ async def create_parking_rate(
     if not await crud.vehicle_type_exists(db, payload.vehicle_type_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="vehicle_type_id does not refer to an existing vehicle type",
+            detail="vehicle_type_id tidak merujuk ke jenis kendaraan yang ada",
         )
     try:
         db_obj = await crud.create(db, payload)
     except IntegrityError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid vehicle_type_id or constraint violation",
+            detail="vehicle_type_id tidak valid atau melanggar batasan",
         )
     await log_action(
         db,
@@ -87,13 +87,13 @@ async def update_parking_rate(
 ):
     db_obj = await crud.get_by_id(db, parking_rate_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parking rate not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarif parkir tidak ditemukan")
 
     if payload.vehicle_type_id is not None:
         if not await crud.vehicle_type_exists(db, payload.vehicle_type_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="vehicle_type_id does not refer to an existing vehicle type",
+                detail="vehicle_type_id tidak merujuk ke jenis kendaraan yang ada",
             )
 
     try:
@@ -101,7 +101,7 @@ async def update_parking_rate(
     except IntegrityError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid vehicle_type_id or constraint violation",
+            detail="vehicle_type_id tidak valid atau melanggar batasan",
         )
     await log_action(
         db,
@@ -123,7 +123,7 @@ async def update_parking_rate_status(
 ):
     db_obj = await crud.get_by_id(db, parking_rate_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parking rate not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarif parkir tidak ditemukan")
     db_obj = await crud.update_status(db, db_obj, payload.status)
     await log_action(
         db,
@@ -144,7 +144,7 @@ async def delete_parking_rate(
 ):
     db_obj = await crud.get_by_id(db, parking_rate_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parking rate not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tarif parkir tidak ditemukan")
     await log_action(
         db,
         module="parking-rate",

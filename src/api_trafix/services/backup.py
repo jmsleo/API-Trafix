@@ -49,7 +49,7 @@ def resolve_download_path(backup: Backup) -> Path:
     directory = _backup_dir()
     path = (directory / backup.filename).resolve()
     if path.parent != directory:
-        raise BackupError("Invalid backup file path")
+        raise BackupError("Path file backup tidak valid")
     return path
 
 
@@ -143,13 +143,13 @@ async def _perform_backup(backup_id: uuid.UUID, user_id: uuid.UUID | None) -> No
                         await proc.wait()
                         target.unlink(missing_ok=True)
                         record.status = BackupStatus.FAILED
-                        record.error_message = f"Backup timed out after {timeout}s"
+                        record.error_message = f"Backup melebihi batas waktu {timeout} detik"
                         record.progress = 0
                         await db.commit()
                         if user is not None:
                             await log_action(
                                 db, "backup", "create", user.id, user.role.value,
-                                f"Backup timed out: {filename}",
+                                f"Backup melebihi batas waktu: {filename}",
                             )
                         return
 
@@ -160,13 +160,13 @@ async def _perform_backup(backup_id: uuid.UUID, user_id: uuid.UUID | None) -> No
                     err = (stderr or b"").decode(errors="replace")[-2000:]
                     target.unlink(missing_ok=True)
                     record.status = BackupStatus.FAILED
-                    record.error_message = err or "pg_dump failed"
+                    record.error_message = err or "pg_dump gagal"
                     record.progress = 0
                     await db.commit()
                     if user is not None:
                         await log_action(
                             db, "backup", "create", user.id, user.role.value,
-                            f"Backup failed: {filename}",
+                            f"Backup gagal: {filename}",
                         )
                     return
 
@@ -174,13 +174,13 @@ async def _perform_backup(backup_id: uuid.UUID, user_id: uuid.UUID | None) -> No
                 if size == 0:
                     target.unlink(missing_ok=True)
                     record.status = BackupStatus.FAILED
-                    record.error_message = "Backup file is empty"
+                    record.error_message = "File backup kosong"
                     record.progress = 0
                     await db.commit()
                     if user is not None:
                         await log_action(
                             db, "backup", "create", user.id, user.role.value,
-                            f"Backup failed: {filename}",
+                            f"Backup gagal: {filename}",
                         )
                     return
 
@@ -192,7 +192,7 @@ async def _perform_backup(backup_id: uuid.UUID, user_id: uuid.UUID | None) -> No
                 if user is not None:
                     await log_action(
                         db, "backup", "create", user.id, user.role.value,
-                        f"Created backup {filename} ({size} bytes)",
+                        f"Backup {filename} berhasil dibuat ({size} byte)",
                     )
             except Exception as exc:  # noqa: BLE001 - background task: any failure marks the backup FAILED
                 target.unlink(missing_ok=True)
@@ -225,7 +225,7 @@ async def import_upload(db: AsyncSession, user: User, upload: UploadFile) -> Bac
                     total += len(chunk)
                     if total > max_bytes:
                         raise BackupError(
-                            f"Uploaded file exceeds limit of {get_settings().backup_upload_max_mb} MB"
+                            f"File yang diunggah melebihi batas {get_settings().backup_upload_max_mb} MB"
                         )
                     if detected is None:
                         detected = _detect_format(chunk)
@@ -236,7 +236,7 @@ async def import_upload(db: AsyncSession, user: User, upload: UploadFile) -> Bac
 
         if total == 0:
             target.unlink(missing_ok=True)
-            raise BackupError("Uploaded file is empty")
+            raise BackupError("File yang diunggah kosong")
 
         record = Backup(
             filename=final_name,
@@ -249,17 +249,17 @@ async def import_upload(db: AsyncSession, user: User, upload: UploadFile) -> Bac
         await db.commit()
         await log_action(
             db, "backup", "upload", user.id, user.role.value,
-            f"Uploaded backup {final_name} ({total} bytes, {record.format} format)",
+            f"Backup {final_name} berhasil diunggah ({total} byte, format {record.format})",
         )
         return record
 
 
 async def start_restore(db: AsyncSession, backup: Backup, user: User) -> Backup:
     if backup.status != BackupStatus.COMPLETED:
-        raise BackupError("Cannot restore from a backup that is not completed")
+        raise BackupError("Tidak dapat memulihkan dari backup yang belum selesai")
     path = _backup_dir() / backup.filename
     if not path.is_file():
-        raise BackupError("Backup file not found on disk")
+        raise BackupError("File backup tidak ditemukan pada disk")
 
     backup.status = BackupStatus.RUNNING
     backup.progress = 0
@@ -279,7 +279,7 @@ async def _perform_restore(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
             path = _backup_dir() / backup.filename
             if not path.is_file():
                 backup.status = BackupStatus.FAILED
-                backup.error_message = "Backup file not found on disk"
+                backup.error_message = "File backup tidak ditemukan pada disk"
                 await db.commit()
                 return
 
@@ -299,7 +299,7 @@ async def _perform_restore(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
                 except TimeoutError:
                     proc.kill()
                     await proc.wait()
-                    raise BackupError(f"Restore timed out after {timeout}s") from None
+                    raise BackupError(f"Pemulihan melebihi batas waktu {timeout} detik") from None
                 return proc.returncode, (stderr or stdout or b"")
 
             if backup.format == "custom":
@@ -390,7 +390,7 @@ async def _perform_restore(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
                         "restore",
                         user_id,
                         snap_user_role,
-                        f"Restored DB from {snap_filename}",
+                        f"Database berhasil dipulihkan dari {snap_filename}",
                     )
 
         except BackupError as exc:
@@ -402,7 +402,7 @@ async def _perform_restore(backup_id: uuid.UUID, user_id: uuid.UUID) -> None:
                         "restore",
                         user.id,
                         user.role.value,
-                        f"Restore failed: {backup.filename}: {exc}",
+                        f"Pemulihan gagal: {backup.filename}: {exc}",
                     )
                 await fail_db.execute(
                     update(Backup)
@@ -440,5 +440,5 @@ async def delete_backup(db: AsyncSession, backup: Backup, user: User) -> None:
         await db.commit()
         await log_action(
             db, "backup", "delete", user.id, user.role.value,
-            f"Deleted backup {backup.filename}",
+            f"Backup {backup.filename} berhasil dihapus",
         )

@@ -52,7 +52,7 @@ async def get_member_subscription(
     if db_obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Member subscription not found",
+            detail="Langganan member tidak ditemukan",
         )
     return db_obj
 
@@ -65,20 +65,20 @@ async def subscribe_member(
 ):
     member = await member_crud.get_by_id(db, payload.member_id)
     if member is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member tidak ditemukan")
     if member.status != MemberStatus.ACTIVE:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Member is not active"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Member tidak aktif"
         )
 
     plan = await plan_crud.get_by_id(db, payload.plan_id)
     if plan is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Subscription plan not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Paket berlangganan tidak ditemukan"
         )
     if not plan.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Subscription plan is not active"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Paket berlangganan tidak aktif"
         )
 
     await subscription_service.auto_expire(db)
@@ -86,7 +86,7 @@ async def subscribe_member(
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Member already has an active subscription",
+            detail="Member sudah memiliki langganan aktif",
         )
 
     db_obj = await crud.create(db, payload, plan)
@@ -111,12 +111,12 @@ async def cancel_member_subscription(
     if db_obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Member subscription not found",
+            detail="Langganan member tidak ditemukan",
         )
     if db_obj.status != "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only an active subscription can be cancelled",
+            detail="Hanya langganan aktif yang dapat dibatalkan",
         )
     db_obj = await crud.cancel(db, db_obj)
     await log_action(
@@ -140,7 +140,7 @@ async def delete_member_subscription(
     if db_obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Member subscription not found",
+            detail="Langganan member tidak ditemukan",
         )
     await log_action(
         db,

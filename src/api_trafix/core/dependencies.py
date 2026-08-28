@@ -31,7 +31,7 @@ async def _token_is_blacklisted(payload: dict) -> bool:
     except redis.exceptions.RedisError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Authentication service unavailable",
+            detail="Layanan autentikasi tidak tersedia",
         )
 
 
@@ -42,7 +42,7 @@ async def get_current_user(
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
+            detail="Belum terautentikasi",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return await _resolve_token_user(credentials.credentials, db)
@@ -55,27 +55,27 @@ async def _resolve_token_user(token: str, db: AsyncSession) -> User:
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
+            detail="Token telah kedaluwarsa",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
+            detail="Token tidak valid",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     if payload.get("type") != ACCESS_TOKEN_TYPE:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type",
+            detail="Jenis token tidak valid",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     if await _token_is_blacklisted(payload):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has been revoked",
+            detail="Token telah dicabut",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -84,7 +84,7 @@ async def _resolve_token_user(token: str, db: AsyncSession) -> User:
     except (TypeError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
+            detail="Token tidak valid",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -92,13 +92,13 @@ async def _resolve_token_user(token: str, db: AsyncSession) -> User:
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail="Pengguna tidak ditemukan",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if user.status.value != "active":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is inactive",
+            detail="Akun tidak aktif",
         )
     return user
 
@@ -111,7 +111,7 @@ async def get_current_user_query(
     if token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing token query parameter",
+            detail="Parameter token tidak ditemukan",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return await _resolve_token_user(token, db)
@@ -124,7 +124,7 @@ def require_roles(*roles: UserRole) -> Callable:
         if current_user.role not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions",
+                detail="Hak akses tidak mencukupi",
             )
         return current_user
 
@@ -162,6 +162,6 @@ async def get_active_operator_session(
     if session is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="No active operator session — start one before operating the gate",
+            detail="Tidak ada sesi operator aktif — mulai sesi terlebih dahulu sebelum mengoperasikan gerbang",
         )
     return session

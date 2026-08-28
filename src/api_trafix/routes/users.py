@@ -39,7 +39,7 @@ async def get_user(
 ):
     db_obj = await crud.get_by_id(db, user_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pengguna tidak ditemukan")
     return db_obj
 
 
@@ -51,7 +51,7 @@ async def create_user(
 ):
     existing = await crud.get_by_username(db, payload.username)
     if existing is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username sudah digunakan")
     db_obj = await crud.create(db, payload)
     await log_action(
         db,
@@ -73,12 +73,12 @@ async def update_user(
 ):
     db_obj = await crud.get_by_id(db, user_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pengguna tidak ditemukan")
 
     if payload.username and payload.username != db_obj.username:
         existing = await crud.get_by_username(db, payload.username)
         if existing is not None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username sudah digunakan")
 
     db_obj = await crud.update(db, db_obj, payload)
     await log_action(
@@ -101,11 +101,11 @@ async def reset_password(
 ):
     db_obj = await crud.get_by_id(db, user_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pengguna tidak ditemukan")
     if payload.password.lower() == db_obj.username:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must not be the same as the username",
+            detail="Password tidak boleh sama dengan username",
         )
     db_obj = await crud.reset_password(db, db_obj, payload.password)
     await log_action(
@@ -127,7 +127,7 @@ async def delete_user(
 ):
     db_obj = await crud.get_by_id(db, user_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pengguna tidak ditemukan")
     await log_action(
         db,
         module="user",

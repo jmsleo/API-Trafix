@@ -248,7 +248,7 @@ class Orchestrator:
                     await publish_gate_event(
                         TYPE_BARRIER_OPENED,
                         gate=gate,
-                        detail="controller acked the barrier command",
+                        detail="kontroller mengonfirmasi perintah gerbang",
                     )
             else:
                 logger.debug("gate %s: %s", gate, message.method)
