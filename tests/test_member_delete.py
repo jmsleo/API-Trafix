@@ -32,6 +32,16 @@ def _plate() -> str:
     return f"H{uuid.uuid4().hex[:6].upper()}"
 
 
+def _base(name=None) -> dict:
+    return {
+        "name": name or f"Member {_suffix()}",
+        "status": "active",
+        "email": f"m{_suffix()}@example.com",
+        "phone_number": "081234567890",
+        "card_number": f"{uuid.uuid4().int % 10**8:08d}",
+    }
+
+
 @pytest_asyncio.fixture(scope="session")
 async def admin_user(db_sessionmaker):
     async with db_sessionmaker() as db:
@@ -75,7 +85,7 @@ async def client(db_sessionmaker, admin_user):
 async def _create_member(client) -> str:
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active"},
+        json={**_base()},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
@@ -92,8 +102,7 @@ async def test_delete_member_cascades_owned_vehicles(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "police_number": _plate(),
             "vehicle_type_id": vehicle_type_id,
         },

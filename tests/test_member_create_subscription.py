@@ -46,6 +46,16 @@ def _plate() -> str:
     return f"H{uuid.uuid4().hex[:6].upper()}"
 
 
+def _base(name=None) -> dict:
+    return {
+        "name": name or f"Member {_suffix()}",
+        "status": "active",
+        "email": f"m{_suffix()}@example.com",
+        "phone_number": "081234567890",
+        "card_number": f"{uuid.uuid4().int % 10**8:08d}",
+    }
+
+
 @pytest_asyncio.fixture(scope="session")
 async def admin_user(db_sessionmaker):
     async with db_sessionmaker() as db:
@@ -105,8 +115,7 @@ async def test_create_member_with_subscription(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "plan_id": str(plan.id),
         },
     )
@@ -123,8 +132,7 @@ async def test_create_member_with_unknown_plan(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "plan_id": str(uuid.uuid4()),
         },
     )
@@ -137,8 +145,7 @@ async def test_create_member_with_inactive_plan(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "plan_id": str(plan.id),
         },
     )
@@ -152,7 +159,7 @@ async def test_create_inactive_member_with_plan(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
+            **_base(),
             "status": "inactive",
             "plan_id": str(plan.id),
         },
@@ -171,8 +178,7 @@ async def test_create_member_with_vehicle_and_subscription(client, db_sessionmak
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "police_number": _plate(),
             "vehicle_type_id": vehicle_type_id,
             "plan_id": str(plan.id),
@@ -188,7 +194,7 @@ async def test_create_member_with_vehicle_and_subscription(client, db_sessionmak
 async def test_create_member_without_subscription(client):
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active"},
+        json={**_base()},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["subscriptions"] == []
