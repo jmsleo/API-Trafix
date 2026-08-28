@@ -48,11 +48,11 @@ def media_dir() -> Path:
 
 def resolve_content_file(content: SignageContent) -> Path:
     if not content.file_path:
-        raise SignageMediaError("Content has no media file")
+        raise SignageMediaError("Konten tidak memiliki file media")
     directory = media_dir()
     path = (directory / content.file_path).resolve()
     if path.parent != directory:
-        raise SignageMediaError("Invalid media file path")
+        raise SignageMediaError("Path file media tidak valid")
     return path
 
 
@@ -61,13 +61,13 @@ def validate_upload(
     filename: str | None,
 ) -> str:
     if content_type not in (SignageContentType.IMAGE, SignageContentType.VIDEO):
-        raise SignageMediaError("content_type must be image or video")
+        raise SignageMediaError("content_type harus berupa gambar atau video")
     extension = Path(filename or "").suffix.lstrip(".").lower()
     allowed = _allowed_extensions()
     mime = allowed.get(extension)
     if mime is None:
         raise SignageMediaError(
-            f"Unsupported file type '.{extension}', allowed: {', '.join(sorted(allowed))}"
+            f"Jenis file '.{extension}' tidak didukung, yang diizinkan: {', '.join(sorted(allowed))}"
         )
     return mime
 

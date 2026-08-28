@@ -233,7 +233,7 @@ async def test_settle_requires_an_active_session(pos):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
-    assert "session" in resp.json()["detail"].lower()
+    assert "sesi" in resp.json()["detail"].lower()
 
 
 async def test_current_session_endpoint(pos):

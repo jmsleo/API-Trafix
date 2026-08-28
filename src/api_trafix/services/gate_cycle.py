@@ -625,7 +625,7 @@ class GateCycleService:
         card_no = str(card_no or "").strip()
         if not card_no:
             return MemberGateInResult(
-                status=STATUS_NOT_FOUND, message="No card number supplied"
+                status=STATUS_NOT_FOUND, message="Nomor kartu tidak diisi"
             )
 
         async with self.session_factory() as session:
@@ -634,7 +634,7 @@ class GateCycleService:
                 log.info("gate %s: card %s is not a member", gate, card_no)
                 return MemberGateInResult(
                     status=STATUS_NOT_FOUND,
-                    message=f"No member found for card {card_no}",
+                    message=f"Tidak ada member yang ditemukan untuk kartu {card_no}",
                 )
 
             if not rates.is_active_member(member, vehicle_id):
@@ -650,7 +650,7 @@ class GateCycleService:
                     member_name=member.name,
                     member_code=member.member_code,
                     plate=member.police_number,
-                    message="Member subscription expired or vehicle class mismatch",
+                    message="Langganan member kedaluwarsa atau kelas kendaraan tidak sesuai",
                 )
 
             gate_id = await gate_uuid(session, gate)
@@ -798,7 +798,7 @@ class GateCycleService:
                 .limit(1)
             )
             if transaction is None:
-                return {"status": STATUS_NOT_FOUND, "message": "Transaction not found"}
+                return {"status": STATUS_NOT_FOUND, "message": "Transaksi tidak ditemukan"}
 
             filename = f"CAMIN_LPR_{transaction_code}_{int(time.time())}.jpg"
             image_path = self._store_upload(filename, image)
@@ -925,7 +925,7 @@ class GateCycleService:
             if transaction is None:
                 return GateOutResult(
                     status=STATUS_NOT_FOUND,
-                    message="Active transaction not found",
+                    message="Transaksi aktif tidak ditemukan",
                 )
             return await self._price(
                 session,
@@ -1095,14 +1095,14 @@ class GateCycleService:
                 await session.commit()
                 return GateOutResult(
                     status=STATUS_NOT_FOUND,
-                    message="Active transaction not found for this ticket or plate",
+                    message="Transaksi aktif tidak ditemukan untuk tiket atau plat ini",
                 )
 
             if _is_paid(transaction) and transaction.exit_time is not None:
                 return GateOutResult(
                     status=STATUS_TICKET_USED,
                     transaction_code=transaction.ticket_number,
-                    message="This ticket has already been used",
+                    message="Tiket ini sudah digunakan",
                 )
 
             quote = await self._price(
@@ -1136,7 +1136,7 @@ class GateCycleService:
                     plate_in=quote.plate_in,
                     plate_out=quote.plate_out,
                     plate_match=False,
-                    message="Plate does not match the entry record",
+                    message="Plat tidak cocok dengan catatan masuk",
                 )
 
             image_path = transaction.cam_out
@@ -1610,13 +1610,13 @@ class GateCycleService:
                 return PosActionResult(
                     status=STATUS_NOT_FOUND,
                     transaction_code=code,
-                    message="Transaction not found",
+                    message="Transaksi tidak ditemukan",
                 )
             if transaction.status_parking == ParkingStatus.VOID:
                 return PosActionResult(
                     status="already_void",
                     transaction_code=code,
-                    message="Transaction is already void",
+                    message="Transaksi sudah dibatalkan (void)",
                 )
 
             payments = (
@@ -1674,7 +1674,7 @@ class GateCycleService:
         return PosActionResult(
             status=STATUS_SUCCESS,
             transaction_code=code,
-            message="Transaction voided",
+            message="Transaksi berhasil dibatalkan (void)",
             refunded=refunded,
             total=total,
         )
@@ -1699,13 +1699,13 @@ class GateCycleService:
                 return PosActionResult(
                     status=STATUS_NOT_FOUND,
                     transaction_code=code,
-                    message="Transaction not found",
+                    message="Transaksi tidak ditemukan",
                 )
             if transaction.status_parking == ParkingStatus.VOID:
                 return PosActionResult(
                     status="already_void",
                     transaction_code=code,
-                    message="Cannot reprint a voided ticket",
+                    message="Tidak dapat mencetak ulang tiket yang sudah dibatalkan",
                 )
 
             gate_codes = await _gate_codes(session)
@@ -1714,7 +1714,7 @@ class GateCycleService:
                 return PosActionResult(
                     status=STATUS_NOT_FOUND,
                     transaction_code=code,
-                    message="Entry gate unknown — cannot reprint",
+                    message="Gerbang masuk tidak diketahui — tidak dapat mencetak ulang",
                 )
 
             vehicle_wire_id = await vehicle_id_of(session, transaction.vehicle_type_id)
@@ -1734,7 +1734,7 @@ class GateCycleService:
                 method="reprint",
                 gate=gate_code,
                 transaction_code=code,
-                detail="entry ticket reprinted",
+                detail="tiket masuk berhasil dicetak ulang",
             )
             await session.commit()
 
@@ -1743,7 +1743,7 @@ class GateCycleService:
         return PosActionResult(
             status=STATUS_SUCCESS,
             transaction_code=code,
-            message="Entry ticket reprinted",
+            message="Tiket masuk berhasil dicetak ulang",
             blocks_printed=len(blocks_1) + len(blocks_2),
         )
 
@@ -1762,13 +1762,13 @@ class GateCycleService:
                 return PosActionResult(
                     status=STATUS_NOT_FOUND,
                     transaction_code=code,
-                    message="Transaction not found",
+                    message="Transaksi tidak ditemukan",
                 )
             if transaction.status_parking == ParkingStatus.VOID:
                 return PosActionResult(
                     status="already_void",
                     transaction_code=code,
-                    message="Cannot print a receipt for a voided ticket",
+                    message="Tidak dapat mencetak struk untuk tiket yang sudah dibatalkan",
                 )
 
             gate_codes = await _gate_codes(session)
@@ -1781,7 +1781,7 @@ class GateCycleService:
                 return PosActionResult(
                     status=STATUS_NOT_FOUND,
                     transaction_code=code,
-                    message="Gate unknown — cannot print the receipt",
+                    message="Gerbang tidak diketahui — tidak dapat mencetak struk",
                 )
 
             blocks = escpos.build_gate_out_receipt(
@@ -1803,7 +1803,7 @@ class GateCycleService:
                 method="receipt",
                 gate=gate_code,
                 transaction_code=code,
-                detail="exit receipt printed",
+                detail="struk keluar berhasil dicetak",
             )
             await session.commit()
 
@@ -1817,7 +1817,7 @@ class GateCycleService:
         return PosActionResult(
             status=STATUS_SUCCESS,
             transaction_code=code,
-            message="Exit receipt printed",
+            message="Struk keluar berhasil dicetak",
             blocks_printed=len(blocks),
         )
 

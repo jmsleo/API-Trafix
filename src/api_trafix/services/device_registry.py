@@ -211,7 +211,7 @@ class DeviceRegistry:
             return self.controllers()[str(gate_code)]
         except KeyError:
             raise RegistryError(
-                f"no gate controller configured for gate {gate_code!r}"
+                f"tidak ada kontroller gerbang yang dikonfigurasi untuk gerbang {gate_code!r}"
             ) from None
 
     def lpr_for(self, gate_code: str) -> LprDevice:
@@ -219,7 +219,7 @@ class DeviceRegistry:
             return self.lpr_items()[str(gate_code)]
         except KeyError:
             raise RegistryError(
-                f"no LPR configured for gate {gate_code!r}"
+                f"tidak ada LPR yang dikonfigurasi untuk gerbang {gate_code!r}"
             ) from None
 
     def entry_gate_codes(self) -> set[str]:

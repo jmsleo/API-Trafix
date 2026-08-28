@@ -145,7 +145,7 @@ async def test_lpr_gatein_requires_plate_and_image(api):
         "/api/lpr/gatein", files={"image": ("a.jpg", b"x", "image/jpeg")}
     )
     assert no_plate.status_code == 400
-    assert no_plate.json()["message"] == "Missing image or plate_num"
+    assert no_plate.json()["message"] == "Gambar atau plate_num tidak diisi"
 
     no_image = await api.client.post("/api/lpr/gatein", data={"plate_num": PLATE})
     assert no_image.status_code == 400
@@ -173,7 +173,7 @@ async def test_lpr_gateinimage_404s_for_an_unknown_ticket(api):
         files={"image": ("a.jpg", b"x", "image/jpeg")},
     )
     assert resp.status_code == 404
-    assert resp.json()["message"] == "Transaction not found"
+    assert resp.json()["message"] == "Transaksi tidak ditemukan"
 
 
 async def test_lpr_checkimage_reports_a_reachable_image(api, monkeypatch):
@@ -202,7 +202,7 @@ async def test_lpr_checkimage_rejects_a_non_image_url(api, monkeypatch):
         data={"plate_num": PLATE, "url_image": "http://lpr/index.html"},
     )
     assert resp.status_code == 400
-    assert resp.json()["message"] == "URL is reachable but not an image"
+    assert resp.json()["message"] == "URL dapat dijangkau tetapi bukan gambar"
 
 
 async def test_lpr_checkimage_404s_without_an_open_session(api, monkeypatch):
@@ -214,13 +214,13 @@ async def test_lpr_checkimage_404s_without_an_open_session(api, monkeypatch):
         data={"plate_num": "NOPE", "url_image": "http://lpr/x.jpg"},
     )
     assert resp.status_code == 404
-    assert resp.json()["message"] == "Active transaction not found for this plate_num"
+    assert resp.json()["message"] == "Transaksi aktif tidak ditemukan untuk plate_num ini"
 
 
 async def test_lpr_checkimage_requires_url_and_plate(api):
     resp = await api.client.post("/api/lpr/checkimage", data={"plate_num": PLATE})
     assert resp.status_code == 400
-    assert resp.json()["message"] == "Missing url_image or plate_num"
+    assert resp.json()["message"] == "url_image atau plate_num tidak diisi"
 
 
 # -- the automated LPR exit --------------------------------------------------
@@ -423,7 +423,7 @@ async def test_checkimagegateout_returns_the_laravel_nested_shape(api):
     assert body["gatein"]["police_number"] == PLATE
     assert body["image"] == {
         "available": False,
-        "message": "No url_image provided",
+        "message": "url_image tidak diisi",
         "url_image": None,
     }
 
@@ -431,7 +431,7 @@ async def test_checkimagegateout_returns_the_laravel_nested_shape(api):
 async def test_checkimagegateout_404s_like_the_real_one(api):
     resp = await api.client.post("/api/lpr/checkimagegateout", params={"plate_num": "NOPE"})
     assert resp.status_code == 404
-    assert "not found" in resp.json()["message"].lower()
+    assert "tidak ditemukan" in resp.json()["message"].lower()
 
 
 # -- the automated RFID exit (PUT /api/lpr/gateoutcard) ----------------------

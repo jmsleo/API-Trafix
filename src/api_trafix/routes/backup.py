@@ -130,7 +130,7 @@ async def get_backup(
 ):
     db_obj = await crud.get_by_id(db, backup_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup tidak ditemukan")
     return db_obj
 
 
@@ -142,13 +142,13 @@ async def download_backup(
 ):
     db_obj = await crud.get_by_id(db, backup_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup tidak ditemukan")
     try:
         path = service.resolve_download_path(db_obj)
     except service.BackupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if not path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup file not found on disk")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File backup tidak ditemukan pada disk")
     return FileResponse(path, filename=db_obj.filename, media_type="application/octet-stream")
 
 
@@ -162,15 +162,15 @@ async def restore_backup(
     if not payload.confirm:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Restore requires confirmation (confirm: true)",
+            detail="Pemulihan memerlukan konfirmasi (confirm: true)",
         )
     db_obj = await crud.get_by_id(db, backup_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup tidak ditemukan")
     if db_obj.status == BackupStatus.RUNNING:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Backup operation already in progress",
+            detail="Operasi backup sudah berjalan",
         )
     try:
         return await service.start_restore(db, db_obj, user)
@@ -188,5 +188,5 @@ async def delete_backup(
 ):
     db_obj = await crud.get_by_id(db, backup_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup tidak ditemukan")
     await service.delete_backup(db, db_obj, user)

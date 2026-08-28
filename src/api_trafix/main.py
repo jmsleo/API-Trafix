@@ -14,8 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from api_trafix.config.database import async_session_maker, init_db
 from api_trafix.config.redis import close_redis
 from api_trafix.config.settings import Settings, get_settings
-from api_trafix.models import Backup, BackupStatus
-from sqlalchemy import update as sa_update
+from api_trafix.core.localization import localize_pydantic_error
 from api_trafix.core.middleware import (
     RequestBodyLimitMiddleware,
     SecurityHeadersMiddleware,
@@ -25,6 +24,8 @@ from api_trafix.core.scheduler import (
     run_periodic_tasks,
     run_weekly_audit_cleanup_loop,
 )
+from api_trafix.models import Backup, BackupStatus
+from sqlalchemy import update as sa_update
 from api_trafix.services.device_registry import DeviceRegistry
 from api_trafix.services.gate_cycle import GateCycleConfig, GateCycleService, NullPublisher
 from api_trafix.services.gate_health import GateHealth
@@ -113,7 +114,7 @@ async def lifespan(app: FastAPI):
             .where(Backup.status == BackupStatus.RUNNING)
             .values(
                 status=BackupStatus.FAILED,
-                error_message="Process restarted while operation was in progress",
+                error_message="Proses dimulai ulang saat operasi masih berjalan",
             )
         )
         await db.commit()
@@ -305,11 +306,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         err_copy = error.copy()
         if "ctx" in err_copy:
             err_copy["ctx"] = {k: str(v) for k, v in err_copy["ctx"].items()}
+        err_copy["msg"] = localize_pydantic_error(err_copy)
         errors.append(err_copy)
 
     return JSONResponse(
         status_code=422,
-        content={"detail": "Request validation failed", "errors": errors},
+        content={"detail": "Validasi permintaan gagal", "errors": errors},
     )
 
 
@@ -319,9 +321,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     if settings.debug:
         return JSONResponse(
             status_code=500,
-            content={"detail": "Internal Server Error", "error": str(exc)},
+            content={"detail": "Terjadi kesalahan internal server", "error": str(exc)},
         )
-    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+    return JSONResponse(status_code=500, content={"detail": "Terjadi kesalahan internal server"})
 
 
 app.include_router(auth_router)

@@ -120,5 +120,5 @@ async def get_audit_log(
 ):
     db_obj = await crud.get_by_id(db, audit_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit log not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Log audit tidak ditemukan")
     return db_obj

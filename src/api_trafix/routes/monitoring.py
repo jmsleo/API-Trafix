@@ -82,7 +82,7 @@ async def _probe_http(url: str, timeout: float = _PROBE_TIMEOUT) -> dict[str, An
             "reachable": False,
             "latency_ms": None,
             "status_code": None,
-            "detail": f"Unreachable: {type(exc).__name__}",
+            "detail": f"Tidak dapat dijangkau: {type(exc).__name__}",
         }
 
 
@@ -137,7 +137,7 @@ def _live_status_for(
                 "total_heartbeats": health.get("total_heartbeats"),
                 "total_inputs": health.get("total_inputs"),
             }
-        return "offline", {"detail": "No gate health entry registered"}
+        return "offline", {"detail": "Tidak ada data kesehatan gerbang yang terdaftar"}
 
     if kind == "signage":
         if signage is not None:
@@ -154,7 +154,7 @@ def _live_status_for(
                     is_recent = False
             status = "online" if is_recent else "offline"
             return status, {"signage_status": signage.get("status"), "detail": updated}
-        return "offline", {"detail": "No signage state registered"}
+        return "offline", {"detail": "Tidak ada status signage yang terdaftar"}
 
     # lpr / camera / reader / other: fall back to DB status + heartbeat age.
     detail: dict[str, Any] = {}
@@ -446,7 +446,7 @@ async def monitoring_signage(gate_code: str, request: Request):
     """Current signage display status for a gate."""
     service = getattr(request.app.state, "signage_display", None)
     if service is None:
-        raise HTTPException(status_code=503, detail="Signage service not available")
+        raise HTTPException(status_code=503, detail="Layanan signage tidak tersedia")
     state = service.get_state(gate_code)
     return {
         "gate_code": state.gate_code,
@@ -515,12 +515,12 @@ async def monitoring_logs(
         try:
             conditions.append(GateEvent.ts >= datetime.fromisoformat(date_from))
         except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid date_from")
+            raise HTTPException(status_code=422, detail="date_from tidak valid")
     if date_to:
         try:
             conditions.append(GateEvent.ts <= datetime.fromisoformat(date_to))
         except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid date_to")
+            raise HTTPException(status_code=422, detail="date_to tidak valid")
 
     total = len(
         (await db.execute(select(GateEvent.id).where(*conditions))).scalars().all()
@@ -574,7 +574,7 @@ async def test_device(
     """
     device = await device_crud.get_by_id(db, device_id)
     if device is None:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="Perangkat tidak ditemukan")
     gate = await gate_crud.get_by_id(db, device.gate_id)
     kind = _kind_of(device.type)
     gate_code = gate.gate_code if gate else None
@@ -584,13 +584,13 @@ async def test_device(
     if kind == "controller":
         health = _controller_health(request, gate_code)
         if health and health.get("is_online"):
-            result.update(reachable=True, detail="Controller online (recent heartbeat)")
+            result.update(reachable=True, detail="Kontroller online (heartbeat terbaru)")
         else:
-            result["detail"] = "Controller has no recent heartbeat"
+            result["detail"] = "Kontroller tidak memiliki heartbeat terbaru"
         # TCP probe if configured
         tcp_gateway = getattr(request.app.state, "tcp_gateway", None)
         if tcp_gateway is not None and gate_code and tcp_gateway.is_connected(gate_code):
-            result.update(reachable=True, detail="Controller connected via TCP")
+            result.update(reachable=True, detail="Kontroller terhubung melalui TCP")
     elif kind == "lpr":
         base = None
         if gate_code:
@@ -609,15 +609,15 @@ async def test_device(
     elif kind == "reader":
         health = _controller_health(request, gate_code)
         if health and health.get("is_online"):
-            result.update(reachable=True, detail="Reader attached to an online controller")
+            result.update(reachable=True, detail="Reader terpasang pada kontroller online")
         else:
-            result["detail"] = "Reader's gate controller is offline"
+            result["detail"] = "Kontroller gerbang reader sedang offline"
     elif kind == "signage":
         signage = _signage_state(request, gate_code)
         if signage is not None:
-            result.update(reachable=True, detail=f"Signage state present ({signage.get('status')})")
+            result.update(reachable=True, detail=f"Status signage tersedia ({signage.get('status')})")
         else:
-            result["detail"] = "No signage state registered"
+            result["detail"] = "Tidak ada status signage yang terdaftar"
     else:
         # Generic TCP reachability on the device port.
         port = int((device.config or {}).get("port", 5000))
@@ -631,10 +631,10 @@ async def test_device(
             result.update(
                 reachable=True,
                 latency_ms=round((time.monotonic() - start) * 1000),
-                detail=f"TCP {device.ip_address}:{port} reachable",
+                detail=f"TCP {device.ip_address}:{port} dapat dijangkau",
             )
         except (OSError, asyncio.TimeoutError) as exc:
-            result["detail"] = f"TCP {device.ip_address}:{port} unreachable ({type(exc).__name__})"
+            result["detail"] = f"TCP {device.ip_address}:{port} tidak dapat dijangkau ({type(exc).__name__})"
 
     return {
         "device_id": str(device.id),
@@ -662,7 +662,7 @@ async def restart_device(
     """
     device = await device_crud.get_by_id(db, device_id)
     if device is None:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail="Perangkat tidak ditemukan")
     gate = await gate_crud.get_by_id(db, device.gate_id)
     gate_code = gate.gate_code if gate else None
     kind = _kind_of(device.type)
@@ -677,9 +677,9 @@ async def restart_device(
             await tcp_gateway._disconnect_gate(gate_code)
             await tcp_gateway._connect_gate(gate_code)
             status = "restarted" if tcp_gateway.is_connected(gate_code) else "failed"
-            detail = "TCP connection restarted"
+            detail = "Koneksi TCP dimulai ulang"
         else:
-            detail = "No reboot opcode in the gate wire protocol (MQTT controller)"
+            detail = "Tidak ada opcode reboot dalam protokol wire gerbang (kontroller MQTT)"
     elif kind in ("lpr", "camera"):
         reboot_path = config.get("reboot_path")
         if reboot_path:
@@ -687,7 +687,7 @@ async def restart_device(
             status = "restarted" if probe["reachable"] else "failed"
             detail = probe["detail"]
         else:
-            detail = f"No reboot_path configured for {device.type}"
+            detail = f"reboot_path tidak dikonfigurasi untuk {device.type}"
     elif kind == "signage":
         signage_publisher = getattr(request.app.state, "signage_publisher", None)
         if signage_publisher is not None and gate_code:
@@ -696,16 +696,16 @@ async def restart_device(
                 async with async_session_maker() as sdb:
                     await signage_publisher.sync_from_db(sdb)
                 status = "restarted"
-                detail = "Signage content resynced to displays"
+                detail = "Konten signage disinkronkan ulang ke tampilan"
             except Exception as exc:  # noqa: BLE001
                 status = "failed"
                 detail = str(exc)
         else:
-            detail = "Signage publisher not available"
+            detail = "Publisher signage tidak tersedia"
     elif kind == "reader":
-        detail = "Reader restart not supported (restart the attached controller instead)"
+        detail = "Restart reader tidak didukung (mulai ulang kontroller yang terpasang)"
     else:
-        detail = f"Restart not supported for device type {device.type}"
+        detail = f"Restart tidak didukung untuk jenis perangkat {device.type}"
 
     from api_trafix.services.audit import log_action
 

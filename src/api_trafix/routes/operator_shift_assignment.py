@@ -42,7 +42,7 @@ async def get_operator_shift_assignment(
     if db_obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Operator shift assignment not found",
+            detail="Penugasan shift operator tidak ditemukan",
         )
     return db_obj
 
@@ -60,23 +60,23 @@ async def assign_shift_to_operator(
     operator = await user_crud.get_by_id(db, payload.operator_id)
     if operator is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Operator not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Operator tidak ditemukan"
         )
     if operator.role != UserRole.OPERATOR:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is not an operator",
+            detail="Pengguna bukan operator",
         )
     if operator.status != UserStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Operator is not active",
+            detail="Operator tidak aktif",
         )
 
     shift = await shift_crud.get_by_id(db, payload.shift_id)
     if shift is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Shift not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan"
         )
 
     existing = await crud.get_by_operator_and_shift(
@@ -85,7 +85,7 @@ async def assign_shift_to_operator(
     if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Operator is already assigned to this shift",
+            detail="Operator sudah ditugaskan ke shift ini",
         )
 
     db_obj = await crud.create(db, payload)
@@ -110,7 +110,7 @@ async def delete_operator_shift_assignment(
     if db_obj is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Operator shift assignment not found",
+            detail="Penugasan shift operator tidak ditemukan",
         )
     await log_action(
         db,

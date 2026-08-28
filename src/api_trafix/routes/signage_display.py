@@ -139,7 +139,7 @@ async def vehicle_detected(request: Request):
     body = await _body(request)
     gate_code = body.get("gate")
     if not gate_code:
-        raise HTTPException(status_code=400, detail="gate code required")
+        raise HTTPException(status_code=400, detail="kode gerbang wajib diisi")
 
     service = get_signage_service()
     await service.update_status(gate_code, "welcome")
@@ -161,7 +161,7 @@ async def help_button(request: Request):
     body = await _body(request)
     gate_code = body.get("gate")
     if not gate_code:
-        raise HTTPException(status_code=400, detail="gate code required")
+        raise HTTPException(status_code=400, detail="kode gerbang wajib diisi")
 
     logger.info("Help button pressed on gate %s", gate_code)
 
@@ -199,13 +199,13 @@ async def update_signage_status(gate_code: str, request: Request):
     body = await _body(request)
     status = body.get("status")
     if not status:
-        raise HTTPException(status_code=400, detail="status required")
+        raise HTTPException(status_code=400, detail="status wajib diisi")
 
     valid_statuses = ["welcome", "thanks", "idle"]
     if status not in valid_statuses:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid status. Must be one of: {valid_statuses}"
+            detail=f"Status tidak valid. Harus salah satu dari: {valid_statuses}"
         )
 
     service = get_signage_service()
@@ -302,7 +302,7 @@ async def sync_content(request: Request):
     """Trigger a content sync from database to displays."""
     signage_publisher = getattr(request.app.state, "signage_publisher", None)
     if signage_publisher is None:
-        raise HTTPException(status_code=503, detail="Signage publisher not available")
+        raise HTTPException(status_code=503, detail="Publisher signage tidak tersedia")
 
     from api_trafix.config.database import async_session_maker
     try:

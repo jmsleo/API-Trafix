@@ -40,7 +40,7 @@ async def get_subscription_plan(plan_id: uuid.UUID, db: AsyncSession = Depends(g
     db_obj = await crud.get_by_id(db, plan_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Subscription plan not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Paket berlangganan tidak ditemukan"
         )
     return db_obj
 
@@ -54,7 +54,7 @@ async def create_subscription_plan(
     existing = await crud.get_by_name(db, payload.name)
     if existing is not None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Name already exists"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan"
         )
     db_obj = await crud.create(db, payload)
     await log_action(
@@ -78,14 +78,14 @@ async def update_subscription_plan(
     db_obj = await crud.get_by_id(db, plan_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Subscription plan not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Paket berlangganan tidak ditemukan"
         )
 
     if payload.name and payload.name != db_obj.name:
         existing = await crud.get_by_name(db, payload.name)
         if existing is not None:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Name already exists"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan"
             )
 
     db_obj = await crud.update(db, db_obj, payload)
@@ -110,7 +110,7 @@ async def update_subscription_plan_status(
     db_obj = await crud.get_by_id(db, plan_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Subscription plan not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Paket berlangganan tidak ditemukan"
         )
     db_obj = await crud.update(db, db_obj, payload)
     await log_action(
@@ -133,12 +133,12 @@ async def delete_subscription_plan(
     db_obj = await crud.get_by_id(db, plan_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Subscription plan not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Paket berlangganan tidak ditemukan"
         )
     if await crud.is_in_use(db, plan_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Plan is in use by member subscriptions",
+            detail="Paket sedang digunakan oleh langganan member",
         )
     await log_action(
         db,

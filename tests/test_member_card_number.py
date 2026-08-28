@@ -131,7 +131,7 @@ async def test_create_member_duplicate_card_rejected(client):
         json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
     )
     assert second.status_code == 400
-    assert "already registered" in second.json()["detail"].lower()
+    assert "sudah terdaftar" in second.json()["detail"].lower()
 
 
 async def test_update_member_assigns_card(client):
@@ -197,7 +197,7 @@ async def test_update_member_card_conflict_rejected(client):
         f"/members/{other.json()['id']}", json={"card_number": card}
     )
     assert resp.status_code == 400
-    assert "already registered" in resp.json()["detail"].lower()
+    assert "sudah terdaftar" in resp.json()["detail"].lower()
 
 
 async def test_update_member_same_card_is_idempotent(client):

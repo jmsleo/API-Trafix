@@ -133,7 +133,7 @@ async def lpr_gatein(request: Request) -> JSONResponse:
     plate = body.get("plate_num")
     if image is None or not plate:
         return _json(
-            {"status": "error", "message": "Missing image or plate_num"},
+            {"status": "error", "message": "Gambar atau plate_num tidak diisi"},
             status_code=400,
         )
     result = await _service(request).lpr_gate_in(plate=str(plate), image=image)
@@ -153,7 +153,7 @@ async def lpr_gateinimage(request: Request) -> JSONResponse:
     trxcode = body.get("transaction_code")
     if image is None or not trxcode:
         return _json(
-            {"status": "error", "message": "Missing image or transaction_code"},
+            {"status": "error", "message": "Gambar atau transaction_code tidak diisi"},
             status_code=400,
         )
     result = await _service(request).attach_gatein_image(
@@ -180,7 +180,7 @@ async def lpr_checkimage(request: Request) -> JSONResponse:
     url_image = body.get("url_image")
     if not url_image or not plate:
         return _json(
-            {"status": "error", "message": "Missing url_image or plate_num"},
+            {"status": "error", "message": "url_image atau plate_num tidak diisi"},
             status_code=400,
         )
 
@@ -190,7 +190,7 @@ async def lpr_checkimage(request: Request) -> JSONResponse:
         return _json(
             {
                 "status": "error",
-                "message": "Active transaction not found for this plate_num",
+                "message": "Transaksi aktif tidak ditemukan untuk plate_num ini",
                 "plate_num": plate,
             },
             status_code=404,
@@ -202,14 +202,14 @@ async def lpr_checkimage(request: Request) -> JSONResponse:
         )
     except httpx.HTTPError as exc:
         return _json(
-            {"status": "error", "message": f"Error checking image: {exc}"},
+            {"status": "error", "message": f"Terjadi kesalahan saat memeriksa gambar: {exc}"},
             status_code=500,
         )
     if not probe.is_success:
         return _json(
             {
                 "status": "error",
-                "message": "Image is not available or unreachable",
+                "message": "Gambar tidak tersedia atau tidak dapat dijangkau",
                 "status_code": probe.status_code,
             },
             status_code=404,
@@ -219,7 +219,7 @@ async def lpr_checkimage(request: Request) -> JSONResponse:
         return _json(
             {
                 "status": "error",
-                "message": "URL is reachable but not an image",
+                "message": "URL dapat dijangkau tetapi bukan gambar",
                 "content_type": content_type,
             },
             status_code=400,
@@ -231,7 +231,7 @@ async def lpr_checkimage(request: Request) -> JSONResponse:
     return _json(
         {
             "status": "success",
-            "message": "Image is available",
+            "message": "Gambar tersedia",
             "plate_num": plate,
             "transaction_code": transaction_code,
             "url_image": url_image,
@@ -308,7 +308,7 @@ async def check_image_gateout(request: Request) -> JSONResponse:
     url_image = body.get("url_image") or body.get("url_gambar")
     if not plate_num:
         return _json(
-            {"status": "error", "message": "Missing plate_num"}, status_code=400
+            {"status": "error", "message": "plate_num tidak diisi"}, status_code=400
         )
 
     srv = _service(request)
@@ -317,23 +317,23 @@ async def check_image_gateout(request: Request) -> JSONResponse:
         return _json(
             {
                 "status": "error",
-                "message": "Active transaction not found for this plate_num",
+                "message": "Transaksi aktif tidak ditemukan untuk plate_num ini",
                 "plate_num": plate_num,
             },
             status_code=404,
         )
 
     available = False
-    message = "No url_image provided"
+    message = "url_image tidak diisi"
     if url_image:
         try:
             probe = await asyncio.to_thread(
                 httpx.get, url_image, timeout=5, follow_redirects=True
             )
             if not probe.is_success:
-                message = "Image is not available or unreachable"
+                message = "Gambar tidak tersedia atau tidak dapat dijangkau"
             elif "image" not in probe.headers.get("content-type", ""):
-                message = "URL is reachable but not an image"
+                message = "URL dapat dijangkau tetapi bukan gambar"
             else:
                 if srv.storage is not None:
                     srv.storage.download_async(
@@ -342,9 +342,9 @@ async def check_image_gateout(request: Request) -> JSONResponse:
                         srv.storage.lpr_filename(url_image, prefix="CAMOUT_LPR"),
                     )
                 available = True
-                message = "Image is available, download queued"
+                message = "Gambar tersedia, unduhan diantrekan"
         except httpx.HTTPError as exc:
-            message = f"Error checking image: {exc}"
+            message = f"Terjadi kesalahan saat memeriksa gambar: {exc}"
 
     return _json(
         {

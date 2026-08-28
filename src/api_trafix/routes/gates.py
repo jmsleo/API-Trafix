@@ -46,7 +46,7 @@ async def get_gate(
 ):
     db_obj = await crud.get_by_id(db, gate_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gerbang tidak ditemukan")
     return db_obj
 
 
@@ -60,7 +60,7 @@ async def create_gate(
     if payload.gate_code and await crud.get_by_gate_code(db, payload.gate_code) is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="gate_code is already in use by another gate",
+            detail="gate_code sudah digunakan oleh gerbang lain",
         )
     db_obj = await crud.create(db, payload)
     await log_action(
@@ -85,14 +85,14 @@ async def update_gate(
 ):
     db_obj = await crud.get_by_id(db, gate_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gerbang tidak ditemukan")
 
     if payload.gate_code and payload.gate_code != db_obj.gate_code:
         existing = await crud.get_by_gate_code(db, payload.gate_code)
         if existing is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="gate_code is already in use by another gate",
+                detail="gate_code sudah digunakan oleh gerbang lain",
             )
 
     db_obj = await crud.update(db, db_obj, payload)
@@ -117,11 +117,11 @@ async def delete_gate(
 ):
     db_obj = await crud.get_by_id(db, gate_id)
     if db_obj is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gate not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gerbang tidak ditemukan")
     if await crud.is_in_use(db, gate_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Gate is referenced by park transactions",
+            detail="Gerbang dirujuk oleh transaksi parkir",
         )
     await log_action(
         db,

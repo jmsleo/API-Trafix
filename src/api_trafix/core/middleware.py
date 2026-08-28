@@ -73,11 +73,11 @@ class RequestBodyLimitMiddleware:
         if content_length is not None:
             try:
                 if int(content_length) > limit:
-                    response = JSONResponse(status_code=413, content={"detail": "Request body too large"})
+                    response = JSONResponse(status_code=413, content={"detail": "Ukuran body permintaan terlalu besar"})
                     await response(scope, receive, send)
                     return
             except ValueError:
-                response = JSONResponse(status_code=400, content={"detail": "Invalid content-length"})
+                response = JSONResponse(status_code=400, content={"detail": "Content-length tidak valid"})
                 await response(scope, receive, send)
                 return
 
@@ -90,7 +90,7 @@ class RequestBodyLimitMiddleware:
                     break
             body = b"".join(chunks)
             if len(body) > limit:
-                response = JSONResponse(status_code=413, content={"detail": "Request body too large"})
+                response = JSONResponse(status_code=413, content={"detail": "Ukuran body permintaan terlalu besar"})
                 await response(scope, receive, send)
                 return
 

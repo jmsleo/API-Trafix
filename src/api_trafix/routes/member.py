@@ -46,7 +46,7 @@ async def get_member(
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member tidak ditemukan"
         )
     return db_obj
 
@@ -61,23 +61,23 @@ async def create_member(
         vehicle_type = await vehicle_type_crud.get_by_id(db, payload.vehicle_type_id)
         if vehicle_type is None:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle type not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Jenis kendaraan tidak ditemukan"
             )
         if vehicle_type.status != VehicleStatus.ACTIVE:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Vehicle type is not active",
+                detail="Jenis kendaraan tidak aktif",
             )
         if await crud.police_number_exists(db, payload.police_number):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Police number already registered",
+                detail="Nomor polisi sudah terdaftar",
             )
 
     if await crud.card_number_exists(db, payload.card_number):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Card number already registered",
+            detail="Nomor kartu sudah terdaftar",
         )
 
     plan = None
@@ -86,17 +86,17 @@ async def create_member(
         if plan is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Subscription plan not found",
+                detail="Paket berlangganan tidak ditemukan",
             )
         if not plan.is_active:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Subscription plan is not active",
+                detail="Paket berlangganan tidak aktif",
             )
         if payload.status != MemberStatus.ACTIVE:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Member is not active",
+                detail="Member tidak aktif",
             )
 
     db_obj = await crud.create(db, payload, plan=plan)
@@ -130,7 +130,7 @@ async def update_member(
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member tidak ditemukan"
         )
     if (
         payload.card_number is not None
@@ -139,7 +139,7 @@ async def update_member(
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Card number already registered",
+            detail="Nomor kartu sudah terdaftar",
         )
     db_obj = await crud.update(db, db_obj, payload)
     await log_action(
@@ -171,7 +171,7 @@ async def block_member(
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member tidak ditemukan"
         )
     db_obj = await crud.block(db, db_obj)
     await log_action(
@@ -194,7 +194,7 @@ async def delete_member(
     db_obj = await crud.get_by_id(db, member_id)
     if db_obj is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Member not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member tidak ditemukan"
         )
     await log_action(
         db,
