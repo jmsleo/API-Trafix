@@ -985,16 +985,13 @@ class GateCycleService:
         entry_vehicle_id = await vehicle_id_of(db, transaction.vehicle_type_id)
 
         tariff_row = None
-        flat_tariff = None
         chosen_wire_id: int | None = None
         if vehicle_type_id is not None:
             chosen = await db.get(VehicleType, vehicle_type_id)
             if chosen is not None:
                 chosen_wire_id = await vehicle_id_of(db, chosen.id)
                 tariff_row = await self._rate_for_vehicle_type(db, chosen.id)
-                if tariff_row is None and chosen.price is not None:
-                    flat_tariff = _flat_tariff_from_price(chosen.price)
-        if tariff_row is None and flat_tariff is None:
+        if tariff_row is None:
             chosen_wire_id = vehicle_id or entry_vehicle_id
             tariff_row = await self._rate_for(db, chosen_wire_id)
 
@@ -1011,14 +1008,6 @@ class GateCycleService:
                 check_in,
                 check_out,
                 vehicle_id=chosen_wire_id,
-                member=member,
-                type=rates.TYPE_LOST if lost else rates.TYPE_NORMAL,
-            )
-        elif flat_tariff is not None:
-            fee = rates.calculate(
-                flat_tariff,
-                check_in,
-                check_out,
                 member=member,
                 type=rates.TYPE_LOST if lost else rates.TYPE_NORMAL,
             )
@@ -1230,9 +1219,7 @@ class GateCycleService:
             tariff_row = await self._rate_for_vehicle_type(db, chosen.id)
             if tariff_row is not None:
                 return rates.Tariff.from_row(tariff_row), chosen.id, None
-            if chosen.price is None:
-                return None, None, "Harga jenis kendaraan belum diatur"
-            return _flat_tariff_from_price(chosen.price), chosen.id, None
+            return None, None, "Tarif kendaraan tidak ditemukan"
 
         if not vehicle_id:
             return None, None, "Jenis kendaraan wajib dipilih untuk tiket hilang"
@@ -1408,15 +1395,8 @@ class GateCycleService:
 
         charge = explicit_total
         if charge is None:
-            vehicle_type = (
-                await db.get(VehicleType, vehicle_type_uuid)
-                if vehicle_type_uuid is not None
-                else None
-            )
-            configured = vehicle_type.price if vehicle_type else None
-            if configured is None:
-                rate_row = await self._rate_for_vehicle_type(db, vehicle_type_uuid)
-                configured = rate_row.base_price if rate_row else None
+            rate_row = await self._rate_for_vehicle_type(db, vehicle_type_uuid)
+            configured = rate_row.base_price if rate_row else None
             if configured is not None:
                 charge = configured
             elif vehicle_type_uuid is not None:
@@ -1994,26 +1974,6 @@ async def _coerce_vehicle(
     from api_trafix.services.vehicles import coerce_vehicle_type_id
 
     return await coerce_vehicle_type_id(db, vehicle_id)
-
-
-def _flat_tariff_from_price(price: float) -> rates.Tariff:
-    """A synthetic Flat tariff charging exactly ``price``.
-
-    Used when a class the admin created has no parking_rates row: the flat
-    price *is* the tariff (ticket_charge 0 so a lost ticket also costs just
-    the configured price).
-    """
-    return rates.Tariff(
-        fee_category=rates.FEE_FLAT,
-        grace_periode=0,
-        fee_first_time=0,
-        fee_first_price=float(price),
-        fee_time_1=0,
-        fee_price_1=0,
-        fee_price_max=0,
-        ticket_charge=0,
-        stay_charge=0,
-    )
 
 
 async def _gate_codes(db: AsyncSession) -> dict[UUID, str]:

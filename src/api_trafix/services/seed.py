@@ -138,15 +138,10 @@ async def seed_reference_data(db: AsyncSession) -> None:
                 VehicleType(
                     code=vehicle["code"],
                     name=vehicle["name"],
-                    price=RATES[vehicle["code"]]["base_price"],
                     status=VehicleStatus.ACTIVE,
                 )
             )
             created_types += 1
-        elif vehicle_type.price is None:
-            # Backfill rows predating vehicle_types.price so the operator
-            # screen shows the familiar flat rates without the SQL migration.
-            vehicle_type.price = RATES[vehicle["code"]]["base_price"]
 
     await db.flush()
 

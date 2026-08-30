@@ -55,8 +55,6 @@ async def test_seed_creates_reference_data(db_sessionmaker):
             for vehicle in (await db.scalars(select(VehicleType))).all()
         }
         assert set(vehicle_types) == {"MOTOR", "MOBIL", "OJOL", "BUS"}
-        for code, vehicle in vehicle_types.items():
-            assert vehicle.price == RATES[code]["base_price"]
 
         rates = (await db.scalars(select(ParkingRate))).all()
         for rate in rates:

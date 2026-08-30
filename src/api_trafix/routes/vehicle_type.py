@@ -64,7 +64,7 @@ async def create_vehicle_type(
         action="create",
         user_id=current_user.id,
         role=current_user.role.value,
-        description=f"Created vehicle type '{db_obj.name}' ({db_obj.code}) price {db_obj.price}",
+        description=f"Created vehicle type '{db_obj.name}' ({db_obj.code})",
     )
     return db_obj
 
@@ -92,7 +92,7 @@ async def update_vehicle_type(
         action="update",
         user_id=current_user.id,
         role=current_user.role.value,
-        description=f"Updated vehicle type '{db_obj.name}' ({db_obj.code}) price {db_obj.price}",
+        description=f"Updated vehicle type '{db_obj.name}' ({db_obj.code})",
     )
     return db_obj
 

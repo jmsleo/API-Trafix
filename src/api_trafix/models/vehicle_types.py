@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Enum, Integer, String
+from sqlalchemy import Column, DateTime, Enum, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -20,10 +20,6 @@ class VehicleType(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code = Column(String(20), nullable=False, unique=True)
     name = Column(String(100), nullable=False)
-    # Flat price charged for a manual ticket of this class, in rupiah. Nullable
-    # so existing rows stay valid; the manual-ticket flow falls back to the
-    # legacy flat rates when unset.
-    price = Column(Integer, nullable=True)
     status = Column(
         Enum(VehicleStatus, values_callable=lambda e: [v.value for v in e], name="vehicle_status"),
         nullable=False,
