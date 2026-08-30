@@ -1,7 +1,8 @@
 """Member "No. Member" = RFID card number.
 
-Admin can register a member with an optional ``card_number`` (digits only,
-leading zeros preserved), edit it later, or clear it. Duplicates are rejected.
+Member creation now requires ``card_number`` (digits only, leading zeros
+preserved) along with ``email`` and ``phone_number``. The card can still be
+edited or cleared after creation. Duplicates are rejected.
 """
 
 import uuid
@@ -33,6 +34,20 @@ async def _restore_db_tables(db_sessionmaker):
 
 def _suffix() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def _unique_card() -> str:
+    return f"{uuid.uuid4().int % 10**8:08d}"
+
+
+def _contacts(card: str | None = None) -> dict:
+    data = {
+        "email": f"m{_suffix()}@example.com",
+        "phone_number": "081234567890",
+    }
+    if card is not None:
+        data["card_number"] = card
+    return data
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -77,32 +92,34 @@ async def client(db_sessionmaker, admin_user):
 async def test_create_member_with_card_number(client):
     resp = await client.post(
         "/members/",
-        json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
-            "card_number": "0006248873",
-        },
+        json={"name": f"Member {_suffix()}", "status": "active", **_contacts(_unique_card())},
     )
     assert resp.status_code == 201, resp.text
-    assert resp.json()["card_number"] == "0006248873"
+    body = resp.json()
+    assert body["card_number"]
+    assert body["email"]
+    assert body["phone_number"]
 
 
 async def test_create_member_without_card_number(client):
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active"},
+        json={"name": f"Member {_suffix()}", "status": "active", **_contacts()},
     )
-    assert resp.status_code == 201, resp.text
-    assert resp.json()["card_number"] is None
+    assert resp.status_code == 422
 
 
-async def test_create_member_empty_card_becomes_none(client):
+async def test_create_member_empty_card_rejected(client):
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": "   "},
+        json={
+            "name": f"Member {_suffix()}",
+            "status": "active",
+            "card_number": "   ",
+            **_contacts(),
+        },
     )
-    assert resp.status_code == 201, resp.text
-    assert resp.json()["card_number"] is None
+    assert resp.status_code == 422
 
 
 async def test_create_member_non_digit_card_rejected(client):
@@ -112,23 +129,24 @@ async def test_create_member_non_digit_card_rejected(client):
             "name": f"Member {_suffix()}",
             "status": "active",
             "card_number": "00-ABC",
+            **_contacts(),
         },
     )
     assert resp.status_code == 422
 
 
 async def test_create_member_duplicate_card_rejected(client):
-    card = f"00{uuid.uuid4().int % 10**8:08d}"
+    card = _unique_card()
 
     first = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
+        json={"name": f"Member {_suffix()}", "status": "active", **_contacts(card)},
     )
     assert first.status_code == 201, first.text
 
     second = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
+        json={"name": f"Member {_suffix()}", "status": "active", **_contacts(card)},
     )
     assert second.status_code == 400
     assert "sudah terdaftar" in second.json()["detail"].lower()
@@ -136,42 +154,35 @@ async def test_create_member_duplicate_card_rejected(client):
 
 async def test_update_member_assigns_card(client):
     created = await client.post(
-        "/members/", json={"name": f"Member {_suffix()}", "status": "active"}
+        "/members/", json={"name": f"Member {_suffix()}", "status": "active", **_contacts(_unique_card())}
     )
     member_id = created.json()["id"]
 
     resp = await client.put(
         f"/members/{member_id}",
-        json={"card_number": "0006248873"},
+        json={"card_number": _unique_card()},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["card_number"] == "0006248873"
+    assert resp.json()["card_number"]
 
 
 async def test_update_member_replaces_card(client):
     created = await client.post(
         "/members/",
-        json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
-            "card_number": "11112222",
-        },
+        json={"name": f"Member {_suffix()}", "status": "active", **_contacts(_unique_card())},
     )
     member_id = created.json()["id"]
 
-    resp = await client.put(f"/members/{member_id}", json={"card_number": "33334444"})
+    new_card = _unique_card()
+    resp = await client.put(f"/members/{member_id}", json={"card_number": new_card})
     assert resp.status_code == 200, resp.text
-    assert resp.json()["card_number"] == "33334444"
+    assert resp.json()["card_number"] == new_card
 
 
 async def test_update_member_clears_card_with_null(client):
     created = await client.post(
         "/members/",
-        json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
-            "card_number": "11112222",
-        },
+        json={"name": f"Member {_suffix()}", "status": "active", **_contacts(_unique_card())},
     )
     member_id = created.json()["id"]
 
@@ -181,15 +192,15 @@ async def test_update_member_clears_card_with_null(client):
 
 
 async def test_update_member_card_conflict_rejected(client):
-    card = f"00{uuid.uuid4().int % 10**8:08d}"
+    card = _unique_card()
     holder = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
+        json={"name": f"Member {_suffix()}", "status": "active", **_contacts(card)},
     )
     assert holder.status_code == 201
 
     other = await client.post(
-        "/members/", json={"name": f"Member {_suffix()}", "status": "active"}
+        "/members/", json={"name": f"Member {_suffix()}", "status": "active", **_contacts(_unique_card())}
     )
     assert other.status_code == 201
 
@@ -201,10 +212,10 @@ async def test_update_member_card_conflict_rejected(client):
 
 
 async def test_update_member_same_card_is_idempotent(client):
-    card = f"00{uuid.uuid4().int % 10**8:08d}"
+    card = _unique_card()
     created = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
+        json={"name": f"Member {_suffix()}", "status": "active", **_contacts(card)},
     )
     member_id = created.json()["id"]
 

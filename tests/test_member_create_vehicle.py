@@ -48,6 +48,16 @@ def _plate() -> str:
     return f"H{uuid.uuid4().hex[:6].upper()}"
 
 
+def _base(name=None) -> dict:
+    return {
+        "name": name or f"Member {_suffix()}",
+        "status": "active",
+        "email": f"m{_suffix()}@example.com",
+        "phone_number": "081234567890",
+        "card_number": f"{uuid.uuid4().int % 10**8:08d}",
+    }
+
+
 @pytest_asyncio.fixture(scope="session")
 async def admin_user(db_sessionmaker):
     async with db_sessionmaker() as db:
@@ -109,7 +119,7 @@ async def _vehicle_type(db_sessionmaker, code="MOBIL", status="active") -> Vehic
 async def test_create_member_without_vehicle(client):
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active"},
+        json={**_base()},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["vehicles"] == []
@@ -123,8 +133,7 @@ async def test_create_member_with_vehicle(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "police_number": raw_plate,
             "vehicle_type_id": str(vehicle_type.id),
         },
@@ -141,8 +150,7 @@ async def test_create_member_with_unknown_vehicle_type(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "police_number": _plate(),
             "vehicle_type_id": str(uuid.uuid4()),
         },
@@ -156,8 +164,7 @@ async def test_create_member_with_inactive_vehicle_type(client, db_sessionmaker)
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "police_number": _plate(),
             "vehicle_type_id": str(vehicle_type.id),
         },
@@ -173,8 +180,7 @@ async def test_create_member_with_duplicate_police_number(client, db_sessionmake
     first = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "police_number": plate,
             "vehicle_type_id": str(vehicle_type.id),
         },
@@ -184,8 +190,7 @@ async def test_create_member_with_duplicate_police_number(client, db_sessionmake
     second = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "police_number": plate,
             "vehicle_type_id": str(vehicle_type.id),
         },
@@ -198,8 +203,7 @@ async def test_create_member_with_only_police_number(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "police_number": _plate(),
         },
     )
@@ -212,8 +216,7 @@ async def test_create_member_with_only_vehicle_type(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
+            **_base(),
             "vehicle_type_id": str(vehicle_type.id),
         },
     )

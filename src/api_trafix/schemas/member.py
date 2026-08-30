@@ -90,9 +90,9 @@ class MemberCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
     name: Name
-    email: Email | None = None
-    phone_number: PhoneNumber | None = None
-    card_number: MemberCardField = None
+    email: Email
+    phone_number: PhoneNumber
+    card_number: CardNumber
     status: MemberStatus
     created_by: UUID | None = None
     police_number: VehiclePlate | None = None
