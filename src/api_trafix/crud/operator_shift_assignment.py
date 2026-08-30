@@ -4,7 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api_trafix.models.operator_shift_assignments import OperatorShiftAssignment
-from api_trafix.schemas.operator_shift_assignment import OperatorShiftAssignmentCreate
+from api_trafix.schemas.operator_shift_assignment import (
+    OperatorShiftAssignmentCreate,
+    OperatorShiftAssignmentUpdate,
+)
 
 
 async def get_all(
@@ -59,11 +62,36 @@ async def get_by_operator_and_shift(
     return result.scalar_one_or_none()
 
 
+async def get_by_shift_id(
+    db: AsyncSession, shift_id: uuid.UUID, exclude_id: uuid.UUID | None = None
+) -> OperatorShiftAssignment | None:
+    stmt = select(OperatorShiftAssignment).where(
+        OperatorShiftAssignment.shift_id == shift_id
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(OperatorShiftAssignment.id != exclude_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def create(
     db: AsyncSession, payload: OperatorShiftAssignmentCreate
 ) -> OperatorShiftAssignment:
     db_obj = OperatorShiftAssignment(**payload.model_dump())
     db.add(db_obj)
+    await db.commit()
+    await db.refresh(db_obj)
+    return await get_by_id(db, db_obj.id)
+
+
+async def update(
+    db: AsyncSession,
+    db_obj: OperatorShiftAssignment,
+    payload: OperatorShiftAssignmentUpdate,
+) -> OperatorShiftAssignment:
+    data = payload.model_dump()
+    for field, value in data.items():
+        setattr(db_obj, field, value)
     await db.commit()
     await db.refresh(db_obj)
     return await get_by_id(db, db_obj.id)

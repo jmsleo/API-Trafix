@@ -46,6 +46,7 @@ from api_trafix.schemas.operator_shift_assignment import (
     OperatorShiftAssignmentCreate,
     OperatorShiftAssignmentPage,
     OperatorShiftAssignmentRead,
+    OperatorShiftAssignmentUpdate,
     ShiftBrief,
 )
 from api_trafix.schemas.park_transaction import (
