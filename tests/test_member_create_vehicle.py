@@ -126,6 +126,22 @@ async def test_create_member_without_vehicle(client):
     assert resp.json()["subscriptions"] == []
 
 
+async def test_create_member_without_phone_rejected(client):
+    resp = await client.post(
+        "/members/",
+        json={"name": f"Member {_suffix()}", "status": "active"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_create_member_with_blank_phone_rejected(client):
+    resp = await client.post(
+        "/members/",
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "   "},
+    )
+    assert resp.status_code == 422
+
+
 async def test_create_member_with_vehicle(client, db_sessionmaker):
     vehicle_type = await _vehicle_type(db_sessionmaker)
     raw_plate = f"b {_plate()[1:]}"  # lowercase + space to prove normalization
