@@ -45,6 +45,13 @@ async def get_by_name(db: AsyncSession, name: str) -> Shift | None:
     return result.scalar_one_or_none()
 
 
+async def list_active(db: AsyncSession) -> list[Shift]:
+    result = await db.execute(
+        select(Shift).where(Shift.status == ShiftStatus.ACTIVE)
+    )
+    return list(result.scalars().all())
+
+
 async def create(db: AsyncSession, payload: ShiftCreate) -> Shift:
     db_obj = Shift(**payload.model_dump())
     db.add(db_obj)

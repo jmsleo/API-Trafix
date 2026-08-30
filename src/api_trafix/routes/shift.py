@@ -5,11 +5,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api_trafix.config.database import get_db
 from api_trafix.core.dependencies import get_current_admin
 from api_trafix.crud import shift as crud
-from api_trafix.models import ShiftStatus, User
+from api_trafix.models import Shift, ShiftStatus, User
 from api_trafix.schemas.shift import ShiftCreate, ShiftPage, ShiftRead, ShiftUpdate
 from api_trafix.services.audit import log_action
+from api_trafix.services.shift_overlap import shifts_overlap
 
 router = APIRouter(prefix="/shifts", tags=["Shifts"])
+
+
+async def _find_overlapping_active_shift(
+    db: AsyncSession,
+    start_time,
+    finish_time,
+    crosses_midnight: bool,
+    exclude_id: uuid.UUID | None = None,
+) -> Shift | None:
+    """Return the first active shift that time-overlaps the given one (self-excluded)."""
+    active_shifts = await crud.list_active(db)
+    for active in active_shifts:
+        if exclude_id is not None and active.id == exclude_id:
+            continue
+        if shifts_overlap(
+            start_time,
+            finish_time,
+            crosses_midnight,
+            active.start_time,
+            active.finish_time,
+            active.crosses_midnight,
+        ):
+            return active
+    return None
 
 
 @router.get("/", response_model=ShiftPage)
@@ -51,6 +76,20 @@ async def create_shift(
     existing = await crud.get_by_name(db, payload.name)
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan")
+
+    if payload.status == ShiftStatus.ACTIVE:
+        conflicting = await _find_overlapping_active_shift(
+            db,
+            payload.start_time,
+            payload.finish_time,
+            payload.crosses_midnight,
+        )
+        if conflicting is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Waktu shift bentrok dengan shift aktif '{conflicting.name}'",
+            )
+
     db_obj = await crud.create(db, payload)
     await log_action(
         db,
@@ -78,6 +117,30 @@ async def update_shift(
         existing = await crud.get_by_name(db, payload.name)
         if existing is not None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if "status" not in update_data:
+        update_data["status"] = db_obj.status
+    if update_data["status"] == ShiftStatus.ACTIVE:
+        # Resolve the effective time range using the incoming values, falling
+        # back to the stored shift for anything not being updated.
+        start_time = update_data.get("start_time", db_obj.start_time)
+        finish_time = update_data.get("finish_time", db_obj.finish_time)
+        crosses_midnight = update_data.get(
+            "crosses_midnight", db_obj.crosses_midnight
+        )
+        conflicting = await _find_overlapping_active_shift(
+            db,
+            start_time,
+            finish_time,
+            crosses_midnight,
+            exclude_id=db_obj.id,
+        )
+        if conflicting is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Waktu shift bentrok dengan shift aktif '{conflicting.name}'",
+            )
 
     db_obj = await crud.update(db, db_obj, payload)
     await log_action(
