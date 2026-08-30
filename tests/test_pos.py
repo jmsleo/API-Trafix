@@ -32,10 +32,12 @@ from api_trafix.models import (
     OperatorSession,
     OperatorShiftAssignment,
     OperatorShiftAssignmentStatus,
+    ParkingRate,
     ParkingStatus,
     ParkTransaction,
     Payment,
     PaymentStatus,
+    RateStatus,
     Shift,
     ShiftStatus,
     User,
@@ -661,21 +663,25 @@ async def test_pos_refs_expose_price_and_wire_id(pos):
     assert types["MOBIL"]["wire_id"] == 2
     assert types["OJOL"]["wire_id"] == 3
     assert types["BUS"]["wire_id"] == 4
-    assert types["MOTOR"]["price"] == 2000
-    assert types["MOBIL"]["price"] == 4000
-    assert types["OJOL"]["price"] == 0
-    assert types["BUS"]["price"] == 6000
+    assert types["MOTOR"]["base_price"] == 2000
+    assert types["MOBIL"]["base_price"] == 4000
+    assert types["OJOL"]["base_price"] == 0
+    assert types["BUS"]["base_price"] == 6000
 
 
 async def test_manual_ticket_charges_the_configured_vehicle_price(pos):
     token, _session, _operator = await _open_session(pos)
     headers = {"Authorization": f"Bearer {token}"}
 
-    # The admin edits the Mobil price; the manual ticket must follow it.
+    # The admin edits the Mobil rate's base_price; the manual ticket follows it.
     async with pos.db() as db:
         mobil = await db.scalar(select(VehicleType).where(VehicleType.code == "MOBIL"))
         assert mobil is not None
-        mobil.price = 7777
+        mobil_rate = await db.scalar(
+            select(ParkingRate).where(ParkingRate.vehicle_type_id == mobil.id)
+        )
+        assert mobil_rate is not None
+        mobil_rate.base_price = 7777
         await db.commit()
 
     try:
@@ -689,19 +695,24 @@ async def test_manual_ticket_charges_the_configured_vehicle_price(pos):
         assert data["total"] == 7777
         assert data["payment_status"] == "lunas"
     finally:
-        # Restore the seed price — the test DB is shared across the suite.
         async with pos.db() as db:
             mobil = await db.scalar(select(VehicleType).where(VehicleType.code == "MOBIL"))
             assert mobil is not None
-            mobil.price = 4000
+            mobil_rate = await db.scalar(
+                select(ParkingRate).where(ParkingRate.vehicle_type_id == mobil.id)
+            )
+            assert mobil_rate is not None
+            mobil_rate.base_price = 4000
             await db.commit()
 
-    # A class with no configured price falls back to the legacy flat rate.
+    # A class with no active rate cannot be manually priced.
     async with pos.db() as db:
         motor = await db.scalar(select(VehicleType).where(VehicleType.code == "MOTOR"))
         assert motor is not None
-        motor.price = None
-        await db.commit()
+        motor_rate = await db.scalar(
+            select(ParkingRate).where(ParkingRate.vehicle_type_id == motor.id)
+        )
+        await _deactivate_rate(db, motor_rate.id)
 
     try:
         resp = await pos.client.post(
@@ -710,27 +721,37 @@ async def test_manual_ticket_charges_the_configured_vehicle_price(pos):
             headers=headers,
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["data"]["total"] == 2000
+        assert resp.json()["status"] == "notfound"
     finally:
         async with pos.db() as db:
-            motor = await db.scalar(select(VehicleType).where(VehicleType.code == "MOTOR"))
-            assert motor is not None
-            motor.price = 2000
-            await db.commit()
+            await _activate_rate(db, motor_rate.id)
 
 
 # -- admin-defined vehicle classes (vehicle_type_id) ---------------------------
 
 
-async def _custom_vehicle_type(db, *, price=5000, status=VehicleStatus.ACTIVE):
-    """A vehicle class the admin invented — outside the 4-class wire contract."""
+async def _custom_vehicle_type(db, *, base_price=5000, status=VehicleStatus.ACTIVE):
+    """A vehicle class the admin invented — outside the 4-class wire contract.
+
+    Pricing lives on a linked active parking_rates row (the single source of
+    truth) that the gate cycle reads instead of a vehicle_types shortcut.
+    """
     vt = VehicleType(
         code=f"GEN{_suffix()[:6].upper()}",
         name="Kendaraan Khusus",
-        price=price,
         status=status,
     )
     db.add(vt)
+    await db.flush()
+    db.add(
+        ParkingRate(
+            name=f"Tarif {vt.code}",
+            vehicle_type_id=vt.id,
+            base_price=base_price,
+            fee_category="flat",
+            status=RateStatus.ACTIVE,
+        )
+    )
     await db.commit()
     await db.refresh(vt)
     return vt
@@ -750,11 +771,25 @@ async def _cleanup_custom_type(db, type_id, ticket_codes):
     await db.commit()
 
 
+async def _deactivate_rate(db, rate_id) -> None:
+    rate = await db.get(ParkingRate, rate_id)
+    if rate is not None:
+        rate.status = RateStatus.INACTIVE
+        await db.commit()
+
+
+async def _activate_rate(db, rate_id) -> None:
+    rate = await db.get(ParkingRate, rate_id)
+    if rate is not None:
+        rate.status = RateStatus.ACTIVE
+        await db.commit()
+
+
 async def test_manual_ticket_accepts_admin_defined_vehicle_type(pos):
     token, _session, _operator = await _open_session(pos)
     headers = {"Authorization": f"Bearer {token}"}
     async with pos.db() as db:
-        vt = await _custom_vehicle_type(db, price=9999)
+        vt = await _custom_vehicle_type(db, base_price=9999)
         vt_id = vt.id
 
     codes: list[str] = []
@@ -797,7 +832,7 @@ async def test_manual_ticket_rejects_unknown_vehicle_type(pos):
 async def test_lost_ticket_prices_an_admin_defined_vehicle_type(pos):
     token, _session, _operator = await _open_session(pos)
     async with pos.db() as db:
-        vt = await _custom_vehicle_type(db, price=5000)
+        vt = await _custom_vehicle_type(db, base_price=5000)
         vt_id = vt.id
 
     codes: list[str] = []
@@ -847,7 +882,7 @@ async def test_quote_honors_a_vehicle_type_override(pos):
 async def test_quote_previews_a_manual_ticket_fee(pos):
     token, _session, _operator = await _open_session(pos)
     async with pos.db() as db:
-        vt = await _custom_vehicle_type(db, price=9999)
+        vt = await _custom_vehicle_type(db, base_price=9999)
         vt_id = vt.id
     try:
         resp = await pos.client.post(
@@ -893,7 +928,7 @@ async def test_quote_previews_lost_fees(pos):
 
     # A class with only a flat price charges exactly that price.
     async with pos.db() as db:
-        vt = await _custom_vehicle_type(db, price=5000)
+        vt = await _custom_vehicle_type(db, base_price=5000)
         flat_id = vt.id
 
     codes: list[str] = []
@@ -919,7 +954,6 @@ async def test_quote_previews_lost_fees(pos):
     async with pos.db() as db:
         motor = await db.scalar(select(VehicleType).where(VehicleType.code == "MOTOR"))
         motor_id = motor.id
-        from api_trafix.models import ParkingRate, RateStatus
 
         rate = await db.scalar(
             select(ParkingRate).where(

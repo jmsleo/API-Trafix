@@ -90,9 +90,9 @@ class MemberCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True, str_strip_whitespace=True)
 
     name: Name
-    email: Email | None = None
+    email: Email
     phone_number: PhoneNumber
-    card_number: MemberCardField = None
+    card_number: CardNumber
     status: MemberStatus
     created_by: UUID | None = None
     police_number: VehiclePlate | None = None
@@ -117,7 +117,6 @@ class MemberUpdate(BaseModel):
     card_number: MemberCardField = None
     status: MemberStatus | None = None
     created_by: UUID | None = None
-    plan_id: UUID | None = None
 
 
 class MemberVehicleTypeBrief(BaseModel):

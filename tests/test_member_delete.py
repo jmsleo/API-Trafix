@@ -32,6 +32,16 @@ def _plate() -> str:
     return f"H{uuid.uuid4().hex[:6].upper()}"
 
 
+def _base(name=None) -> dict:
+    return {
+        "name": name or f"Member {_suffix()}",
+        "status": "active",
+        "email": f"m{_suffix()}@example.com",
+        "phone_number": "081234567890",
+        "card_number": f"{uuid.uuid4().int % 10**8:08d}",
+    }
+
+
 @pytest_asyncio.fixture(scope="session")
 async def admin_user(db_sessionmaker):
     async with db_sessionmaker() as db:
@@ -75,7 +85,7 @@ async def client(db_sessionmaker, admin_user):
 async def _create_member(client) -> str:
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890"},
+        json={**_base()},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
@@ -92,9 +102,7 @@ async def test_delete_member_cascades_owned_vehicles(client, db_sessionmaker):
     resp = await client.post(
         "/members/",
         json={
-            "name": f"Member {_suffix()}",
-            "status": "active",
-            "phone_number": "081234567890",
+            **_base(),
             "police_number": _plate(),
             "vehicle_type_id": vehicle_type_id,
         },
@@ -123,10 +131,12 @@ async def test_delete_member_cascades_owned_subscriptions(client, db_sessionmake
     async with db_sessionmaker() as db:
         plan = await db.scalar(select(SubscriptionPlan).limit(1))
         if plan is None:
+            vehicle_type = await db.scalar(select(VehicleType).limit(1))
             plan = SubscriptionPlan(
                 name=f"Plan {_suffix()}",
                 duration_in_days=30,
                 price=10000,
+                vehicle_type_id=vehicle_type.id,
                 is_active=True,
             )
             db.add(plan)
