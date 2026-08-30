@@ -38,6 +38,8 @@ from api_trafix.crud import vehicle_type as vehicle_type_crud
 from api_trafix.models import (
     GateEvent,
     OperatorSession,
+    ParkingRate,
+    RateStatus,
     ShiftStatus,
     User,
     UserRole,
@@ -56,6 +58,19 @@ from api_trafix.schemas.operator_session import OperatorSessionRead
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/pos", tags=["POS"])
+
+
+async def _active_base_price(db: AsyncSession, vehicle_type_id: UUID) -> int | None:
+    """The flat ``base_price`` of the active rate for a vehicle class."""
+    rate = await db.scalar(
+        select(ParkingRate)
+        .where(
+            ParkingRate.vehicle_type_id == vehicle_type_id,
+            ParkingRate.status == RateStatus.ACTIVE,
+        )
+        .order_by(ParkingRate.created_at.desc())
+    )
+    return rate.base_price if rate is not None else None
 
 
 async def _operator_query_user(
@@ -219,8 +234,9 @@ async def operator_references(
                 "id": vt.id,
                 "code": vt.code,
                 "name": vt.name,
-                # Flat manual-ticket price (may be null when not configured).
-                "price": vt.price,
+                # Flat manual-ticket price from the active parking rate (the
+                # single source of truth); None when no active rate exists.
+                "base_price": await _active_base_price(db, vt.id),
                 # The gate-cycle wire id (1-4) the POS hotkeys address, or
                 # None for classes outside the wire contract.
                 "wire_id": await vehicle_id_of(db, vt.id),

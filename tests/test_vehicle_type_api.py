@@ -1,4 +1,4 @@
-"""Admin CRUD for /vehicle-types with the editable flat ``price`` field."""
+"""Admin CRUD for /vehicle-types."""
 
 import uuid
 from types import SimpleNamespace
@@ -56,50 +56,33 @@ async def _delete_vehicle_type(db_sessionmaker, vehicle_type_id: str) -> None:
         await db.commit()
 
 
-async def test_create_with_price_and_update_it(client, db_sessionmaker):
+async def test_create_and_update_it(client, db_sessionmaker):
     code = f"PRC{_suffix()}"
     resp = await client.client.post(
         "/vehicle-types/",
-        json={"code": code, "name": "Mobil Harga Test", "price": 4000, "status": "active"},
+        json={"code": code, "name": "Mobil Test", "status": "active"},
     )
     assert resp.status_code == 201, resp.text
     body = resp.json()
-    assert body["price"] == 4000
+    assert "price" not in body
     vehicle_type_id = body["id"]
 
     resp = await client.client.put(
         f"/vehicle-types/{vehicle_type_id}",
-        json={"price": 5500},
+        json={"name": "Mobil A"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["price"] == 5500
+    assert resp.json()["name"] == "Mobil A"
 
     await _delete_vehicle_type(db_sessionmaker, vehicle_type_id)
 
 
-async def test_create_rejects_negative_and_fractional_price(client):
+async def test_create_ignores_removed_price_field(client, db_sessionmaker):
     code = f"NEG{_suffix()}"
     resp = await client.client.post(
         "/vehicle-types/",
-        json={"code": code, "name": "Harga Minus", "price": -1, "status": "active"},
-    )
-    assert resp.status_code == 422
-
-    resp = await client.client.post(
-        "/vehicle-types/",
-        json={"code": code, "name": "Harga Pecahan", "price": 2.5, "status": "active"},
-    )
-    assert resp.status_code == 422
-
-
-async def test_create_allows_null_price(client, db_sessionmaker):
-    code = f"NLP{_suffix()}"
-    resp = await client.client.post(
-        "/vehicle-types/",
-        json={"code": code, "name": "Tanpa Harga", "status": "active"},
+        json={"code": code, "name": "Tidak Valid", "price": 4000, "status": "active"},
     )
     assert resp.status_code == 201, resp.text
-    body = resp.json()
-    assert body["price"] is None
-
-    await _delete_vehicle_type(db_sessionmaker, body["id"])
+    assert "price" not in resp.json()
+    await _delete_vehicle_type(db_sessionmaker, resp.json()["id"])
