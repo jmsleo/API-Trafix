@@ -3,9 +3,11 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api_trafix.models.member_subscriptions import MemberSubscription
 from api_trafix.models.subscription_plans import SubscriptionPlan
+from api_trafix.models.vehicle_types import VehicleType
 from api_trafix.schemas.subscription_plan import SubscriptionPlanCreate, SubscriptionPlanUpdate
 
 
@@ -29,7 +31,8 @@ async def get_all(
 
     total = (await db.execute(count_stmt)).scalar_one()
     stmt = (
-        stmt.order_by(SubscriptionPlan.name)
+        stmt.options(selectinload(SubscriptionPlan.vehicle_type))
+        .order_by(SubscriptionPlan.name)
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -38,8 +41,19 @@ async def get_all(
 
 
 async def get_by_id(db: AsyncSession, plan_id: uuid.UUID) -> SubscriptionPlan | None:
-    result = await db.execute(select(SubscriptionPlan).where(SubscriptionPlan.id == plan_id))
+    result = await db.execute(
+        select(SubscriptionPlan)
+        .where(SubscriptionPlan.id == plan_id)
+        .options(selectinload(SubscriptionPlan.vehicle_type))
+    )
     return result.scalar_one_or_none()
+
+
+async def vehicle_type_exists(db: AsyncSession, vehicle_type_id: uuid.UUID) -> bool:
+    result = await db.execute(
+        select(func.count()).select_from(VehicleType).where(VehicleType.id == vehicle_type_id)
+    )
+    return (result.scalar_one() or 0) > 0
 
 
 async def get_by_name(db: AsyncSession, name: str) -> SubscriptionPlan | None:
@@ -64,8 +78,7 @@ async def create(db: AsyncSession, payload: SubscriptionPlanCreate) -> Subscript
     except IntegrityError:
         await db.rollback()
         raise
-    await db.refresh(db_obj)
-    return db_obj
+    return await get_by_id(db, db_obj.id)
 
 
 async def update(
@@ -79,8 +92,7 @@ async def update(
     except IntegrityError:
         await db.rollback()
         raise
-    await db.refresh(db_obj)
-    return db_obj
+    return await get_by_id(db, db_obj.id)
 
 
 async def delete(db: AsyncSession, db_obj: SubscriptionPlan) -> None:

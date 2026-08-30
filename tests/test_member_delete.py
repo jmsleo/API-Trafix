@@ -131,10 +131,12 @@ async def test_delete_member_cascades_owned_subscriptions(client, db_sessionmake
     async with db_sessionmaker() as db:
         plan = await db.scalar(select(SubscriptionPlan).limit(1))
         if plan is None:
+            vehicle_type = await db.scalar(select(VehicleType).limit(1))
             plan = SubscriptionPlan(
                 name=f"Plan {_suffix()}",
                 duration_in_days=30,
                 price=10000,
+                vehicle_type_id=vehicle_type.id,
                 is_active=True,
             )
             db.add(plan)

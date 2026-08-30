@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -15,10 +15,14 @@ class SubscriptionPlan(Base):
     name = Column(String(50), nullable=False)
     duration_in_days = Column(Integer, nullable=False)
     price = Column(Integer, nullable=False)
+    vehicle_type_id = Column(
+        UUID(as_uuid=True), ForeignKey("vehicle_types.id"), nullable=False
+    )
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
+    vehicle_type = relationship("VehicleType", back_populates="subscription_plans")
     member_subscriptions = relationship(
         "MemberSubscription", back_populates="plan", cascade="all, delete-orphan"
     )

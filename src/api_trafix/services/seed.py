@@ -242,6 +242,7 @@ async def _seed_demo_member(db: AsyncSession) -> int:
             name="Demo Bulanan",
             duration_in_days=30,
             price=100000,
+            vehicle_type_id=vehicle_type.id,
             is_active=True,
         )
         db.add(plan)

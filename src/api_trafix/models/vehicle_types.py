@@ -36,3 +36,6 @@ class VehicleType(Base):
     parking_slots = relationship(
         "ParkingSlot", back_populates="vehicle_type", cascade="all, delete-orphan"
     )
+    subscription_plans = relationship(
+        "SubscriptionPlan", back_populates="vehicle_type", cascade="all, delete-orphan"
+    )
