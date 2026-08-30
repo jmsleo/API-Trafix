@@ -56,6 +56,10 @@ async def create_subscription_plan(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan"
         )
+    if not await crud.vehicle_type_exists(db, payload.vehicle_type_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Jenis kendaraan tidak ditemukan"
+        )
     db_obj = await crud.create(db, payload)
     await log_action(
         db,
@@ -87,6 +91,13 @@ async def update_subscription_plan(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan"
             )
+
+    if payload.vehicle_type_id is not None and not await crud.vehicle_type_exists(
+        db, payload.vehicle_type_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Jenis kendaraan tidak ditemukan"
+        )
 
     db_obj = await crud.update(db, db_obj, payload)
     await log_action(

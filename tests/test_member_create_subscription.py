@@ -87,10 +87,12 @@ async def client(db_sessionmaker, admin_user):
 
 async def _plan(db_sessionmaker, name=None, is_active=True) -> SubscriptionPlan:
     async with db_sessionmaker() as db:
+        vehicle_type = await db.scalar(select(VehicleType).limit(1))
         plan = SubscriptionPlan(
             name=name or f"Plan {_suffix()}",
             duration_in_days=30,
             price=100000,
+            vehicle_type_id=vehicle_type.id,
             is_active=is_active,
         )
         db.add(plan)
