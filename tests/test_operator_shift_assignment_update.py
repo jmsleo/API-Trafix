@@ -234,3 +234,41 @@ async def test_update_conflict_on_existing_pair(client, db_sessionmaker):
     assert resp.status_code == 409
 
     await _clear(db_sessionmaker, [asg1.id, asg2.id], [op1.id, op2.id], [shift1.id])
+
+
+async def test_create_rejects_shift_assigned_to_other_operator(client, db_sessionmaker):
+    op1 = await _create_operator(db_sessionmaker)
+    op2 = await _create_operator(db_sessionmaker)
+    shift1 = await _create_shift_time(db_sessionmaker, f"asg-shift-{_suffix()}", (8, 0), (12, 0))
+
+    asg1 = await _create_assignment(db_sessionmaker, op1, shift1)
+
+    resp = await client.client.post(
+        "/operator-shifts/",
+        json={"operator_id": str(op2.id), "shift_id": str(shift1.id)},
+    )
+    assert resp.status_code == 409
+    assert "operator lain" in resp.json()["detail"]
+
+    await _clear(db_sessionmaker, [asg1.id], [op1.id, op2.id], [shift1.id])
+
+
+async def test_update_rejects_shift_assigned_to_other_operator(client, db_sessionmaker):
+    op1 = await _create_operator(db_sessionmaker)
+    op2 = await _create_operator(db_sessionmaker)
+    shift1 = await _create_shift_time(db_sessionmaker, f"asg-shift-{_suffix()}", (8, 0), (12, 0))
+    shift2 = await _create_shift_time(db_sessionmaker, f"asg-shift-{_suffix()}", (13, 0), (17, 0))
+
+    asg1 = await _create_assignment(db_sessionmaker, op1, shift1)
+    asg2 = await _create_assignment(db_sessionmaker, op2, shift2)
+
+    resp = await client.client.put(
+        f"/operator-shifts/{asg1.id}",
+        json={"operator_id": str(op1.id), "shift_id": str(shift2.id), "status": "active"},
+    )
+    assert resp.status_code == 409
+    assert "operator lain" in resp.json()["detail"]
+
+    await _clear(
+        db_sessionmaker, [asg1.id, asg2.id], [op1.id, op2.id], [shift1.id, shift2.id]
+    )

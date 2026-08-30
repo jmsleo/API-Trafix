@@ -62,6 +62,18 @@ async def get_by_operator_and_shift(
     return result.scalar_one_or_none()
 
 
+async def get_by_shift_id(
+    db: AsyncSession, shift_id: uuid.UUID, exclude_id: uuid.UUID | None = None
+) -> OperatorShiftAssignment | None:
+    stmt = select(OperatorShiftAssignment).where(
+        OperatorShiftAssignment.shift_id == shift_id
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(OperatorShiftAssignment.id != exclude_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def create(
     db: AsyncSession, payload: OperatorShiftAssignmentCreate
 ) -> OperatorShiftAssignment:

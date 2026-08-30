@@ -89,6 +89,13 @@ async def assign_shift_to_operator(
             detail="Operator sudah ditugaskan ke shift ini",
         )
 
+    shift_taken = await crud.get_by_shift_id(db, payload.shift_id)
+    if shift_taken is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Shift sudah ditugaskan ke operator lain",
+        )
+
     db_obj = await crud.create(db, payload)
     await log_action(
         db,
@@ -147,6 +154,15 @@ async def update_operator_shift_assignment(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Operator sudah ditugaskan ke shift ini",
+        )
+
+    shift_taken = await crud.get_by_shift_id(
+        db, payload.shift_id, exclude_id=assignment_id
+    )
+    if shift_taken is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Shift sudah ditugaskan ke operator lain",
         )
 
     previous_operator = db_obj.operator.username if db_obj.operator else str(db_obj.operator_id)
