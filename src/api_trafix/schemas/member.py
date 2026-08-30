@@ -91,7 +91,7 @@ class MemberCreate(BaseModel):
 
     name: Name
     email: Email | None = None
-    phone_number: PhoneNumber | None = None
+    phone_number: PhoneNumber
     card_number: MemberCardField = None
     status: MemberStatus
     created_by: UUID | None = None
@@ -117,6 +117,7 @@ class MemberUpdate(BaseModel):
     card_number: MemberCardField = None
     status: MemberStatus | None = None
     created_by: UUID | None = None
+    plan_id: UUID | None = None
 
 
 class MemberVehicleTypeBrief(BaseModel):

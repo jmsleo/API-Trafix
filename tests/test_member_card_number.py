@@ -80,6 +80,7 @@ async def test_create_member_with_card_number(client):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "card_number": "0006248873",
         },
     )
@@ -90,7 +91,7 @@ async def test_create_member_with_card_number(client):
 async def test_create_member_without_card_number(client):
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active"},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890"},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["card_number"] is None
@@ -99,7 +100,7 @@ async def test_create_member_without_card_number(client):
 async def test_create_member_empty_card_becomes_none(client):
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": "   "},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890", "card_number": "   "},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["card_number"] is None
@@ -111,6 +112,7 @@ async def test_create_member_non_digit_card_rejected(client):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "card_number": "00-ABC",
         },
     )
@@ -122,13 +124,13 @@ async def test_create_member_duplicate_card_rejected(client):
 
     first = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890", "card_number": card},
     )
     assert first.status_code == 201, first.text
 
     second = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890", "card_number": card},
     )
     assert second.status_code == 400
     assert "sudah terdaftar" in second.json()["detail"].lower()
@@ -136,7 +138,7 @@ async def test_create_member_duplicate_card_rejected(client):
 
 async def test_update_member_assigns_card(client):
     created = await client.post(
-        "/members/", json={"name": f"Member {_suffix()}", "status": "active"}
+        "/members/", json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890"}
     )
     member_id = created.json()["id"]
 
@@ -154,6 +156,7 @@ async def test_update_member_replaces_card(client):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "card_number": "11112222",
         },
     )
@@ -170,6 +173,7 @@ async def test_update_member_clears_card_with_null(client):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "card_number": "11112222",
         },
     )
@@ -184,12 +188,12 @@ async def test_update_member_card_conflict_rejected(client):
     card = f"00{uuid.uuid4().int % 10**8:08d}"
     holder = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890", "card_number": card},
     )
     assert holder.status_code == 201
 
     other = await client.post(
-        "/members/", json={"name": f"Member {_suffix()}", "status": "active"}
+        "/members/", json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890"}
     )
     assert other.status_code == 201
 
@@ -204,7 +208,7 @@ async def test_update_member_same_card_is_idempotent(client):
     card = f"00{uuid.uuid4().int % 10**8:08d}"
     created = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active", "card_number": card},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890", "card_number": card},
     )
     member_id = created.json()["id"]
 

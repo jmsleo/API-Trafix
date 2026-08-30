@@ -107,6 +107,7 @@ async def test_create_member_with_subscription(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "plan_id": str(plan.id),
         },
     )
@@ -125,6 +126,7 @@ async def test_create_member_with_unknown_plan(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "plan_id": str(uuid.uuid4()),
         },
     )
@@ -139,6 +141,7 @@ async def test_create_member_with_inactive_plan(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "plan_id": str(plan.id),
         },
     )
@@ -154,6 +157,7 @@ async def test_create_inactive_member_with_plan(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "inactive",
+            "phone_number": "081234567890",
             "plan_id": str(plan.id),
         },
     )
@@ -173,6 +177,7 @@ async def test_create_member_with_vehicle_and_subscription(client, db_sessionmak
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "police_number": _plate(),
             "vehicle_type_id": vehicle_type_id,
             "plan_id": str(plan.id),
@@ -188,7 +193,7 @@ async def test_create_member_with_vehicle_and_subscription(client, db_sessionmak
 async def test_create_member_without_subscription(client):
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active"},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890"},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["subscriptions"] == []

@@ -75,7 +75,7 @@ async def client(db_sessionmaker, admin_user):
 async def _create_member(client) -> str:
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active"},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890"},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
@@ -94,6 +94,7 @@ async def test_delete_member_cascades_owned_vehicles(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "police_number": _plate(),
             "vehicle_type_id": vehicle_type_id,
         },

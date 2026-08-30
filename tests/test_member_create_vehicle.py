@@ -109,11 +109,27 @@ async def _vehicle_type(db_sessionmaker, code="MOBIL", status="active") -> Vehic
 async def test_create_member_without_vehicle(client):
     resp = await client.post(
         "/members/",
-        json={"name": f"Member {_suffix()}", "status": "active"},
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "081234567890"},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["vehicles"] == []
     assert resp.json()["subscriptions"] == []
+
+
+async def test_create_member_without_phone_rejected(client):
+    resp = await client.post(
+        "/members/",
+        json={"name": f"Member {_suffix()}", "status": "active"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_create_member_with_blank_phone_rejected(client):
+    resp = await client.post(
+        "/members/",
+        json={"name": f"Member {_suffix()}", "status": "active", "phone_number": "   "},
+    )
+    assert resp.status_code == 422
 
 
 async def test_create_member_with_vehicle(client, db_sessionmaker):
@@ -125,6 +141,7 @@ async def test_create_member_with_vehicle(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "police_number": raw_plate,
             "vehicle_type_id": str(vehicle_type.id),
         },
@@ -143,6 +160,7 @@ async def test_create_member_with_unknown_vehicle_type(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "police_number": _plate(),
             "vehicle_type_id": str(uuid.uuid4()),
         },
@@ -158,6 +176,7 @@ async def test_create_member_with_inactive_vehicle_type(client, db_sessionmaker)
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "police_number": _plate(),
             "vehicle_type_id": str(vehicle_type.id),
         },
@@ -175,6 +194,7 @@ async def test_create_member_with_duplicate_police_number(client, db_sessionmake
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "police_number": plate,
             "vehicle_type_id": str(vehicle_type.id),
         },
@@ -186,6 +206,7 @@ async def test_create_member_with_duplicate_police_number(client, db_sessionmake
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "police_number": plate,
             "vehicle_type_id": str(vehicle_type.id),
         },
@@ -200,6 +221,7 @@ async def test_create_member_with_only_police_number(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "police_number": _plate(),
         },
     )
@@ -214,6 +236,7 @@ async def test_create_member_with_only_vehicle_type(client, db_sessionmaker):
         json={
             "name": f"Member {_suffix()}",
             "status": "active",
+            "phone_number": "081234567890",
             "vehicle_type_id": str(vehicle_type.id),
         },
     )
