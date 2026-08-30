@@ -4,7 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api_trafix.models.operator_shift_assignments import OperatorShiftAssignment
-from api_trafix.schemas.operator_shift_assignment import OperatorShiftAssignmentCreate
+from api_trafix.schemas.operator_shift_assignment import (
+    OperatorShiftAssignmentCreate,
+    OperatorShiftAssignmentUpdate,
+)
 
 
 async def get_all(
@@ -64,6 +67,19 @@ async def create(
 ) -> OperatorShiftAssignment:
     db_obj = OperatorShiftAssignment(**payload.model_dump())
     db.add(db_obj)
+    await db.commit()
+    await db.refresh(db_obj)
+    return await get_by_id(db, db_obj.id)
+
+
+async def update(
+    db: AsyncSession,
+    db_obj: OperatorShiftAssignment,
+    payload: OperatorShiftAssignmentUpdate,
+) -> OperatorShiftAssignment:
+    data = payload.model_dump()
+    for field, value in data.items():
+        setattr(db_obj, field, value)
     await db.commit()
     await db.refresh(db_obj)
     return await get_by_id(db, db_obj.id)

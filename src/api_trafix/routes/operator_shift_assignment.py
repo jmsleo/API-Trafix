@@ -13,6 +13,7 @@ from api_trafix.schemas.operator_shift_assignment import (
     OperatorShiftAssignmentCreate,
     OperatorShiftAssignmentPage,
     OperatorShiftAssignmentRead,
+    OperatorShiftAssignmentUpdate,
 )
 
 router = APIRouter(prefix="/operator-shifts", tags=["Operator Shift Assignments"])
@@ -96,6 +97,72 @@ async def assign_shift_to_operator(
         user_id=current_user.id,
         role=current_user.role.value,
         description=f"Assigned operator '{operator.username}' to shift '{shift.name}'",
+    )
+    return db_obj
+
+
+@router.put(
+    "/{assignment_id}",
+    response_model=OperatorShiftAssignmentRead,
+)
+async def update_operator_shift_assignment(
+    assignment_id: uuid.UUID,
+    payload: OperatorShiftAssignmentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_by_id(db, assignment_id)
+    if db_obj is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Penugasan shift operator tidak ditemukan",
+        )
+
+    operator = await user_crud.get_by_id(db, payload.operator_id)
+    if operator is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Operator tidak ditemukan"
+        )
+    if operator.role != UserRole.OPERATOR:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pengguna bukan operator",
+        )
+    if operator.status != UserStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Operator tidak aktif",
+        )
+
+    shift = await shift_crud.get_by_id(db, payload.shift_id)
+    if shift is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan"
+        )
+
+    existing = await crud.get_by_operator_and_shift(
+        db, payload.operator_id, payload.shift_id
+    )
+    if existing is not None and existing.id != assignment_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Operator sudah ditugaskan ke shift ini",
+        )
+
+    previous_operator = db_obj.operator.username if db_obj.operator else str(db_obj.operator_id)
+    previous_shift = db_obj.shift.name if db_obj.shift else str(db_obj.shift_id)
+    db_obj = await crud.update(db, db_obj, payload)
+    await log_action(
+        db,
+        module="operator-shift",
+        action="update",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=(
+            f"Updated assignment for operator '{previous_operator}' "
+            f"to shift '{previous_shift}' (new operator '{operator.username}', "
+            f"shift '{shift.name}')"
+        ),
     )
     return db_obj
 

@@ -32,6 +32,14 @@ class OperatorShiftAssignmentCreate(BaseModel):
     shift_id: UUID
 
 
+class OperatorShiftAssignmentUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    operator_id: UUID
+    shift_id: UUID
+    status: OperatorShiftAssignmentStatus
+
+
 class OperatorShiftAssignmentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
