@@ -117,6 +117,23 @@ class MemberUpdate(BaseModel):
     card_number: MemberCardField = None
     status: MemberStatus | None = None
     created_by: UUID | None = None
+    plan_id: UUID | None = None
+    police_number: VehiclePlate | None = None
+    vehicle_type_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _vehicle_fields_together(self):
+        police_set = "police_number" in self.model_fields_set
+        type_set = "vehicle_type_id" in self.model_fields_set
+        if police_set ^ type_set:
+            raise ValueError(
+                "police_number and vehicle_type_id must be provided together"
+            )
+        if police_set and (self.police_number is None) != (self.vehicle_type_id is None):
+            raise ValueError(
+                "police_number and vehicle_type_id must be provided together"
+            )
+        return self
 
 
 class MemberVehicleTypeBrief(BaseModel):
