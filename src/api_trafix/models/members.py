@@ -39,5 +39,8 @@ class Member(Base):
         "MemberVehicle", back_populates="member", cascade="all, delete-orphan"
     )
     subscriptions = relationship(
-        "MemberSubscription", back_populates="member", cascade="all, delete-orphan"
+        "MemberSubscription",
+        back_populates="member",
+        cascade="all, delete-orphan",
+        order_by="desc(MemberSubscription.start_date)",
     )
