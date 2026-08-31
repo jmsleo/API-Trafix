@@ -4,6 +4,12 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
+class DashboardShiftItem(BaseModel):
+    """Shift item untuk dropdown filter dashboard."""
+    id: uuid.UUID
+    name: str
+
+
 class RevenueTodayResponse(BaseModel):
     """Total pendapatan hari ini (WIB)."""
 
@@ -18,6 +24,7 @@ class RevenueByShiftItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     exit_shift_id: uuid.UUID | None
+    shift_name: str | None = None
     total_revenue: int
     total_transactions: int
 
