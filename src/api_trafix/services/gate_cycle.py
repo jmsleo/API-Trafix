@@ -183,6 +183,7 @@ class GateOutResult:
     payment_status: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    chosen_vehicle_type_id: UUID | None = None
 
     @property
     def ok(self) -> bool:
@@ -986,6 +987,7 @@ class GateCycleService:
 
         tariff_row = None
         chosen_wire_id: int | None = None
+        chosen = None
         if vehicle_type_id is not None:
             chosen = await db.get(VehicleType, vehicle_type_id)
             if chosen is not None:
@@ -1041,6 +1043,7 @@ class GateCycleService:
             payment_status=transaction.payment_status,
             created_at=format_wib(transaction.created_at),
             updated_at=format_wib(transaction.updated_at),
+            chosen_vehicle_type_id=chosen.id if chosen is not None else None,
         )
 
     # -- check-out ---------------------------------------------------------
@@ -1160,6 +1163,11 @@ class GateCycleService:
                 )
             transaction.exit_operator_id = exit_operator_id or None
             transaction.exit_shift_id = exit_shift_id or None
+
+            # The cashier's selected class was used for pricing; persist it so
+            # reports show the class the vehicle was actually charged for.
+            if quote.chosen_vehicle_type_id is not None:
+                transaction.vehicle_type_id = quote.chosen_vehicle_type_id
 
             self._log_event(
                 session,
