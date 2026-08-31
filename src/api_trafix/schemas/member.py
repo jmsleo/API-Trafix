@@ -92,7 +92,7 @@ class MemberCreate(BaseModel):
     name: Name
     email: Email
     phone_number: PhoneNumber
-    card_number: CardNumber
+    card_number: MemberCardField = None
     status: MemberStatus
     created_by: UUID | None = None
     police_number: VehiclePlate | None = None

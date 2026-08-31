@@ -152,3 +152,23 @@ async def test_change_plan(client, db_sessionmaker):
     assert body["subscriptions"][0]["plan"]["id"] == str(plan_tenant.id), (
         "subscriptions[0] should be the tenant plan"
     )
+
+
+async def test_create_without_card_number(client, db_sessionmaker):
+    async with db_sessionmaker() as db:
+        vt = await db.scalar(select(VehicleType).limit(1))
+        vt_id = str(vt.id)
+
+    created = await client.post(
+        "/members/",
+        json={
+            **_base("No Card Member"),
+            "card_number": "",
+            "police_number": _plate(),
+            "vehicle_type_id": vt_id,
+            "plan_id": None,
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["card_number"] is None, "card_number should be null when omitted"
