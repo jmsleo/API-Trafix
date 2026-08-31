@@ -117,6 +117,7 @@ class MemberUpdate(BaseModel):
     card_number: MemberCardField = None
     status: MemberStatus | None = None
     created_by: UUID | None = None
+    plan_id: UUID | None = None
 
 
 class MemberVehicleTypeBrief(BaseModel):
