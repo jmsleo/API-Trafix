@@ -155,9 +155,22 @@ async def test_change_plan(client, db_sessionmaker):
 
 
 async def test_create_without_card_number(client, db_sessionmaker):
+    from api_trafix.models.members import Member
+
     async with db_sessionmaker() as db:
         vt = await db.scalar(select(VehicleType).limit(1))
         vt_id = str(vt.id)
+
+        existing = Member(
+            name="Existing No Card",
+            member_code=f"FP-{_suffix()}",
+            email=f"existing{_suffix()}@example.com",
+            phone_number="081234567890",
+            card_number=None,
+            status="active",
+        )
+        db.add(existing)
+        await db.commit()
 
     created = await client.post(
         "/members/",

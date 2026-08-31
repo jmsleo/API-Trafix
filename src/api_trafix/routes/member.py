@@ -76,7 +76,7 @@ async def create_member(
                 detail="Nomor polisi sudah terdaftar",
             )
 
-    if await crud.card_number_exists(db, payload.card_number):
+    if payload.card_number and await crud.card_number_exists(db, payload.card_number):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nomor kartu sudah terdaftar",
