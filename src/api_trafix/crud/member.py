@@ -155,6 +155,8 @@ async def police_number_exists(db: AsyncSession, police_number: str) -> bool:
 
 async def update(db: AsyncSession, db_obj: Member, payload: MemberUpdate) -> Member:
     update_data = payload.model_dump(exclude_unset=True)
+    for field in ("police_number", "vehicle_type_id", "plan_id"):
+        update_data.pop(field, None)
     for field, value in update_data.items():
         setattr(db_obj, field, value)
     try:
@@ -166,6 +168,23 @@ async def update(db: AsyncSession, db_obj: Member, payload: MemberUpdate) -> Mem
     db_obj = await get_by_id(db, db_obj.id)
     assert db_obj is not None
     return db_obj
+
+
+async def set_vehicle(
+    db: AsyncSession,
+    db_obj: Member,
+    *,
+    police_number: str,
+    vehicle_type_id: uuid.UUID,
+) -> None:
+    """Create or update the member's vehicle in place."""
+    vehicle = db_obj.vehicles[0] if db_obj.vehicles else None
+    if vehicle is None:
+        vehicle = MemberVehicle(member_id=db_obj.id)
+        db.add(vehicle)
+    vehicle.police_number = police_number
+    vehicle.vehicle_type_id = vehicle_type_id
+    await db.commit()
 
 
 async def delete(db: AsyncSession, db_obj: Member) -> None:

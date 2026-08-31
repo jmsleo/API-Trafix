@@ -144,8 +144,38 @@ async def update_member(
             detail="Nomor kartu sudah terdaftar",
         )
 
-    # Handle plan change: swap the member's active subscription
     update_data = payload.model_dump(exclude_unset=True)
+
+    # Handle vehicle change (police_number + vehicle_type_id together)
+    vehicle_type_id = update_data.pop("vehicle_type_id", None)
+    new_police_number = update_data.pop("police_number", None)
+    if vehicle_type_id is not None:
+        vehicle_type = await vehicle_type_crud.get_by_id(db, vehicle_type_id)
+        if vehicle_type is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Jenis kendaraan tidak ditemukan",
+            )
+        if vehicle_type.status != VehicleStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Jenis kendaraan tidak aktif",
+            )
+        if await crud.police_number_exists(db, new_police_number):
+            existing = db_obj.vehicles[0] if db_obj.vehicles else None
+            if existing is None or existing.police_number != new_police_number:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Nomor polisi sudah terdaftar",
+                )
+        await crud.set_vehicle(
+            db,
+            db_obj,
+            police_number=new_police_number,
+            vehicle_type_id=vehicle_type_id,
+        )
+
+    # Handle plan change: swap the member's active subscription
     new_plan_id = update_data.pop("plan_id", None)
     if new_plan_id is not None:
         plan = await plan_crud.get_by_id(db, new_plan_id)
@@ -201,6 +231,11 @@ async def update_member(
             + (
                 f" plan changed to '{plan.name}'"
                 if new_plan_id is not None
+                else ""
+            )
+            + (
+                f" vehicle set to '{new_police_number}'"
+                if vehicle_type_id is not None
                 else ""
             )
         ),
