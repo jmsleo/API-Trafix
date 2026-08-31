@@ -266,6 +266,29 @@ async def block_member(
     return db_obj
 
 
+@router.patch("/{member_id}/unblock", response_model=MemberRead)
+async def unblock_member(
+    member_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin),
+):
+    db_obj = await crud.get_by_id(db, member_id)
+    if db_obj is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Member tidak ditemukan"
+        )
+    db_obj = await crud.unblock(db, db_obj)
+    await log_action(
+        db,
+        module="member",
+        action="unblock",
+        user_id=current_user.id,
+        role=current_user.role.value,
+        description=f"Unblocked member '{db_obj.name}' ({db_obj.member_code})",
+    )
+    return db_obj
+
+
 @router.delete("/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_member(
     member_id: uuid.UUID,

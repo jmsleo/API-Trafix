@@ -185,3 +185,33 @@ async def test_create_without_card_number(client, db_sessionmaker):
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["card_number"] is None, "card_number should be null when omitted"
+
+
+async def test_block_and_unblock_member(client, db_sessionmaker):
+    async with db_sessionmaker() as db:
+        vt = await db.scalar(select(VehicleType).limit(1))
+        vt_id = str(vt.id)
+
+    created = await client.post(
+        "/members/",
+        json={
+            **_base("Blockable Member"),
+            "card_number": "",
+            "police_number": _plate(),
+            "vehicle_type_id": vt_id,
+            "plan_id": None,
+        },
+    )
+    assert created.status_code == 201, created.text
+    member_id = created.json()["id"]
+
+    blocked = await client.patch(f"/members/{member_id}/block")
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["status"] == "blocked"
+
+    unblocked = await client.patch(f"/members/{member_id}/unblock")
+    assert unblocked.status_code == 200, unblocked.text
+    assert unblocked.json()["status"] == "active"
+
+    missing = await client.patch("/members/00000000-0000-0000-0000-000000000000/block")
+    assert missing.status_code == 404

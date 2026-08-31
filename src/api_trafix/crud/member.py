@@ -71,6 +71,14 @@ async def block(db: AsyncSession, db_obj: Member) -> Member:
     return db_obj
 
 
+async def unblock(db: AsyncSession, db_obj: Member) -> Member:
+    db_obj.status = MemberStatus.ACTIVE
+    await db.commit()
+    db_obj = await get_by_id(db, db_obj.id)
+    assert db_obj is not None
+    return db_obj
+
+
 async def get_by_id(db: AsyncSession, member_id: uuid.UUID) -> Member | None:
     result = await db.execute(
         _with_children(select(Member)).where(Member.id == member_id)
