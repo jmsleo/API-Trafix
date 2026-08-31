@@ -99,6 +99,8 @@ class PosSettleRequest(BaseModel):
     vehicle_type_id: UUID | None = None
     # Quote-only: price a manual ticket even though no transaction exists yet.
     manual: bool = False
+    # Payment method chosen by the cashier (TUNAI / QRIS / E-MONEY).
+    payment_method: str | None = None
 
 
 class PosVoidRequest(BaseModel):
@@ -123,6 +125,7 @@ class PosManualRequest(BaseModel):
     # An admin-managed vehicle class (wins over the legacy wire id).
     vehicle_type_id: UUID | None = None
     total: float | None = None
+    payment_method: str | None = None
 
 
 # -- payload helpers (mirror the wire response shapes) ------------------------
@@ -305,6 +308,7 @@ async def settle_transaction(
             plate=payload.police_number,
             vehicle_id=payload.vehicle_id,
             vehicle_type_id=payload.vehicle_type_id,
+            payment_method=payload.payment_method,
             exit_operator_id=operator_session.user_id,
             exit_shift_id=operator_session.shift_id,
         )
@@ -316,6 +320,7 @@ async def settle_transaction(
             lost=payload.lost_ticket,
             vehicle_id=payload.vehicle_id,
             vehicle_type_id=payload.vehicle_type_id,
+            payment_method=payload.payment_method,
             exit_operator_id=operator_session.user_id,
             exit_shift_id=operator_session.shift_id,
         )
@@ -351,6 +356,7 @@ async def manual_transaction(
         vehicle_id=payload.vehicle_id,
         vehicle_type_id=payload.vehicle_type_id,
         total=payload.total,
+        payment_method=payload.payment_method,
         gate=operator_session.gate.gate_code,
         exit_operator_id=operator_session.user_id,
         exit_shift_id=operator_session.shift_id,

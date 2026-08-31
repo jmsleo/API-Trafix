@@ -95,6 +95,9 @@ class ParkTransaction(Base):
 
     # Gate-cycle columns (mirror of the mock's transactions table). The wire
     # format the gate hardware / Tauri cashier expect uses these.
+    transaction_method: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="normal"
+    )
     card_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
     payment_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     payment_type: Mapped[str] = mapped_column(String(10), nullable=False, default="cash")

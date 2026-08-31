@@ -111,6 +111,23 @@ def plates_equal(a: str | None, b: str | None) -> bool:
     return na is not None and na == nb
 
 
+def parse_payment_method(raw: str | None) -> tuple[PaymentMethod | None, str | None]:
+    """Map a cashier's payment-method label to the wire ``PaymentMethod``.
+
+    The operator app sends ``TUNAI`` / ``QRIS`` / ``E-MONEY``. Returns
+    ``(method, payment_type_label)``; ``(None, None)`` when no/unknown value.
+    """
+    if raw is None:
+        return None, None
+    key = raw.strip().upper()
+    mapping = {
+        "TUNAI": (PaymentMethod.CASH, "cash"),
+        "QRIS": (PaymentMethod.QRIS, "qris"),
+        "E-MONEY": (PaymentMethod.EMONEY, "emoney"),
+    }
+    return mapping.get(key, (None, None))
+
+
 class Publisher(Protocol):
     """How the service reaches the gate hardware."""
 
@@ -1062,6 +1079,7 @@ class GateCycleService:
         lost: bool = False,
         vehicle_id: int | None = None,
         vehicle_type_id: UUID | None = None,
+        payment_method: str | None = None,
         open_barrier: bool = True,
     ) -> GateOutResult:
         """Settle a parking session and release the vehicle.
@@ -1169,6 +1187,22 @@ class GateCycleService:
             if quote.chosen_vehicle_type_id is not None:
                 transaction.vehicle_type_id = quote.chosen_vehicle_type_id
 
+            # Record the cashier's chosen payment method so reports show it.
+            pm_method, pm_label = parse_payment_method(payment_method)
+            if pm_method is not None:
+                transaction.payment_type = pm_label
+                session.add(
+                    Payment(
+                        park_transaction_id=transaction.id,
+                        amount=transaction.total_fee,
+                        method=pm_method,
+                        status=PaymentStatus.SUCCESS,
+                        reference_number=transaction.ticket_number,
+                        paid_at=transaction.paid_at or self.clock(),
+                    )
+                )
+            transaction.transaction_method = "normal"
+
             self._log_event(
                 session,
                 source="api",
@@ -1244,6 +1278,7 @@ class GateCycleService:
         plate: str | None,
         vehicle_id: int | None = None,
         vehicle_type_id: UUID | None = None,
+        payment_method: str | None = None,
         admin_id: int | None = None,
         shift_id: int | None = None,
         exit_operator_id: UUID | None = None,
@@ -1302,6 +1337,8 @@ class GateCycleService:
 
             gate_id = await gate_uuid(session, gate)
 
+            pm_method, pm_label = parse_payment_method(payment_method)
+            paid_tx = None
             if open_tx is not None:
                 open_tx.exit_time = now
                 open_tx.total_fee = int(fee.total)
@@ -1312,35 +1349,52 @@ class GateCycleService:
                 open_tx.status_parking = ParkingStatus.COMPLETED
                 open_tx.vehicle_type_id = vehicle_type_uuid
                 open_tx.keterangan = "tiket hilang"
+                open_tx.transaction_method = "lost"
                 open_tx.exit_operator_id = exit_operator_id or None
                 open_tx.exit_shift_id = exit_shift_id or None
+                if pm_label is not None:
+                    open_tx.payment_type = pm_label
+                paid_tx = open_tx
                 code = open_tx.ticket_number or ""
             else:
                 code = await self.generate_transaction_code(session)
+                paid_tx = ParkTransaction(
+                    ticket_number=code,
+                    entry_time=now,
+                    exit_time=now,
+                    vehicle_type_id=vehicle_type_uuid,
+                    police_number=plate_norm,
+                    total_fee=int(fee.total),
+                    duration=fee.duration,
+                    status_parking=ParkingStatus.COMPLETED,
+                    entry_gate_id=gate_id or await _require_any_gate(session),
+                    exit_gate_id=gate_id,
+                    payment_status="lunas",
+                    paid_at=now,
+                    cam_in="-",
+                    camin_lpr="-",
+                    payment_type=pm_label or "cash",
+                    keterangan="tiket hilang",
+                    transaction_method="lost",
+                    detection_method=DetectionMethodForWire.MANUAL,
+                    exit_operator_id=exit_operator_id or None,
+                    exit_shift_id=exit_shift_id or None,
+                )
+                session.add(paid_tx)
+                code = code or ""
+
+            if pm_method is not None:
+                await session.flush()
                 session.add(
-                    ParkTransaction(
-                        ticket_number=code,
-                        entry_time=now,
-                        exit_time=now,
-                        vehicle_type_id=vehicle_type_uuid,
-                        police_number=plate_norm,
-                        total_fee=int(fee.total),
-                        duration=fee.duration,
-                        status_parking=ParkingStatus.COMPLETED,
-                        entry_gate_id=gate_id or await _require_any_gate(session),
-                        exit_gate_id=gate_id,
-                        payment_status="lunas",
+                    Payment(
+                        park_transaction_id=paid_tx.id,
+                        amount=int(fee.total),
+                        method=pm_method,
+                        status=PaymentStatus.SUCCESS,
+                        reference_number=paid_tx.ticket_number,
                         paid_at=now,
-                        cam_in="-",
-                        camin_lpr="-",
-                        payment_type="cash",
-                        keterangan="tiket hilang",
-                        detection_method=DetectionMethodForWire.MANUAL,
-                        exit_operator_id=exit_operator_id or None,
-                        exit_shift_id=exit_shift_id or None,
                     )
                 )
-                code = code or ""
 
             self._log_event(
                 session,
@@ -1463,6 +1517,7 @@ class GateCycleService:
         police_number: str,
         vehicle_id: int | None = None,
         vehicle_type_id: UUID | None = None,
+        payment_method: str | None = None,
         admin_id: int | None = None,
         shift_id: int | None = None,
         exit_operator_id: UUID | None = None,
@@ -1512,6 +1567,7 @@ class GateCycleService:
                 else await vehicle_id_of(session, vehicle_type_uuid)
             )
 
+            pm_method, pm_label = parse_payment_method(payment_method)
             transaction = ParkTransaction(
                 ticket_number=code,
                 entry_time=now,
@@ -1527,14 +1583,27 @@ class GateCycleService:
                 paid_at=now,
                 cam_in="-",
                 camin_lpr="-",
-                payment_type="cash",
+                payment_type=pm_label or "cash",
                 keterangan="tiket tidak cetak",
+                transaction_method="manual",
                 detection_method=DetectionMethodForWire.MANUAL,
                 exit_operator_id=exit_operator_id or None,
                 exit_shift_id=exit_shift_id or None,
             )
             session.add(transaction)
             await session.flush()
+
+            if pm_method is not None:
+                session.add(
+                    Payment(
+                        park_transaction_id=transaction.id,
+                        amount=int(charge),
+                        method=pm_method,
+                        status=PaymentStatus.SUCCESS,
+                        reference_number=transaction.ticket_number,
+                        paid_at=now,
+                    )
+                )
 
             self._log_event(
                 session,
