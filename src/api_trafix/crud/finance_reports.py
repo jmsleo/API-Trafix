@@ -21,6 +21,19 @@ from api_trafix.models import (
 
 WIB = timezone(timedelta(hours=7))
 
+# Map the storage enum values to the labels the operator app displays.
+PAYMENT_METHOD_LABELS = {
+    "Cash": "TUNAI",
+    "QRIS": "QRIS",
+    "Emoney": "E-MONEY",
+}
+
+
+def _payment_method_label(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    return PAYMENT_METHOD_LABELS.get(raw, raw)
+
 
 def _date_to_utc_range(d: date) -> tuple[datetime, datetime]:
     """Konversi satu tanggal (WIB) menjadi rentang awal-akhir hari dalam UTC."""
@@ -103,7 +116,8 @@ async def get_transaction_report(
             .order_by(Payment.paid_at.asc())
         )
         for tx_id, method in (await db.execute(pay_stmt)).all():
-            method_by_tx.setdefault(tx_id, method.value if isinstance(method, PaymentMethod) else str(method))
+            raw = method.value if isinstance(method, PaymentMethod) else str(method)
+            method_by_tx.setdefault(tx_id, _payment_method_label(raw))
 
     items = [
         {
