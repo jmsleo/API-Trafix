@@ -48,6 +48,7 @@ from api_trafix.models import (
 )
 from api_trafix.routes import auth as auth_routes
 from api_trafix.routes import gate_cycle as gate_routes
+from api_trafix.routes import operator_shift_assignment as assignment_routes
 from api_trafix.routes import operator_session as operator_session_routes
 from api_trafix.routes import pos as pos_routes
 from api_trafix.services.gate_cycle import WIB, GateCycleConfig, GateCycleService, NullPublisher
@@ -91,6 +92,7 @@ async def pos(db_sessionmaker, tmp_path):
     app.include_router(auth_routes.router)
     app.include_router(gate_routes.router)
     app.include_router(operator_session_routes.router)
+    app.include_router(assignment_routes.router)
     app.include_router(pos_routes.router)
 
     async def override_get_db():
@@ -297,10 +299,41 @@ async def test_session_start_rejects_unknown_shift(pos):
     assert resp.status_code == 404
 
 
+async def test_session_start_rejects_unassigned_shift(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift(db)
+        shift_id = shift.id
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await _start_session(pos, token, shift_id)
+    assert resp.status_code == 403
+
+
+async def test_me_returns_only_active_assigned_shifts(pos):
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        assigned = await _create_shift(db, name=f"assigned-{_suffix()}")
+        other = await _create_shift(db, name=f"other-{_suffix()}")
+        await _assign(db, operator, assigned)
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await pos.client.get(
+        "/operator-shifts/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    shifts = resp.json()
+    ids = [s["id"] for s in shifts]
+    assert str(assigned.id) in ids
+    assert str(other.id) not in ids
+
+
 async def test_session_start_opens_session_for_operator(pos):
     async with pos.db() as db:
         operator = await _create_operator(db)
         shift = await _create_shift(db)
+        await _assign(db, operator, shift)
         exit_gate = await _gate(db, "2")
         shift_id = shift.id
     login_resp = await _login(pos, operator)
@@ -324,6 +357,7 @@ async def test_session_start_rejects_entry_gate(pos):
     async with pos.db() as db:
         operator = await _create_operator(db)
         shift = await _create_shift(db)
+        await _assign(db, operator, shift)
         entry_gate = await _gate(db, "1")
         shift_id, entry_id = shift.id, entry_gate.id
     login_resp = await _login(pos, operator)
@@ -338,6 +372,7 @@ async def test_session_start_requires_exactly_one_exit_gate(pos):
         async with pos.db() as db:
             operator = await _create_operator(db)
             shift = await _create_shift(db)
+            await _assign(db, operator, shift)
             suffix = _suffix()
             extra = Gate(
                 name=f"Extra Exit {suffix}",

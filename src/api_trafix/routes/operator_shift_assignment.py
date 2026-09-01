@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api_trafix.config.database import get_db
-from api_trafix.core.dependencies import get_current_admin
+from api_trafix.core.dependencies import get_current_admin, get_current_operator
 from api_trafix.crud import operator_shift_assignment as crud
 from api_trafix.crud import shift as shift_crud
 from api_trafix.crud import users as user_crud
@@ -15,8 +15,19 @@ from api_trafix.schemas.operator_shift_assignment import (
     OperatorShiftAssignmentRead,
     OperatorShiftAssignmentUpdate,
 )
+from api_trafix.schemas.shift import ShiftRead
 
 router = APIRouter(prefix="/operator-shifts", tags=["Operator Shift Assignments"])
+
+
+@router.get("/me", response_model=list[ShiftRead])
+async def list_my_assigned_shifts(
+    operator: User = Depends(get_current_operator),
+    db: AsyncSession = Depends(get_db),
+):
+    """The current operator's ACTIVE assigned shifts (used at login)."""
+    assignments = await crud.get_active_by_operator(db, operator.id)
+    return [assignment.shift for assignment in assignments]
 
 
 @router.get("/", response_model=OperatorShiftAssignmentPage)

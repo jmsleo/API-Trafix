@@ -3,7 +3,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api_trafix.models.operator_shift_assignments import OperatorShiftAssignment
+from api_trafix.models.operator_shift_assignments import (
+    OperatorShiftAssignment,
+    OperatorShiftAssignmentStatus,
+)
 from api_trafix.schemas.operator_shift_assignment import (
     OperatorShiftAssignmentCreate,
     OperatorShiftAssignmentUpdate,
@@ -60,6 +63,37 @@ async def get_by_operator_and_shift(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_active_by_operator(
+    db: AsyncSession, operator_id: uuid.UUID
+) -> list[OperatorShiftAssignment]:
+    """Return the operator's ACTIVE shift assignments (with shift loaded)."""
+    stmt = (
+        select(OperatorShiftAssignment)
+        .where(
+            OperatorShiftAssignment.operator_id == operator_id,
+            OperatorShiftAssignment.status == OperatorShiftAssignmentStatus.ACTIVE,
+        )
+        .options(selectinload(OperatorShiftAssignment.shift))
+        .order_by(OperatorShiftAssignment.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def has_active_assignment(
+    db: AsyncSession, operator_id: uuid.UUID, shift_id: uuid.UUID
+) -> bool:
+    """Whether the operator has an ACTIVE shift assignment for ``shift_id``."""
+    result = await db.execute(
+        select(OperatorShiftAssignment.id).where(
+            OperatorShiftAssignment.operator_id == operator_id,
+            OperatorShiftAssignment.shift_id == shift_id,
+            OperatorShiftAssignment.status == OperatorShiftAssignmentStatus.ACTIVE,
+        )
+    )
+    return result.scalar_one_or_none() is not None
 
 
 async def get_by_shift_id(
