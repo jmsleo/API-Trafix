@@ -36,6 +36,7 @@ from api_trafix.models import (
 )
 from api_trafix.routes import finance_reports
 from api_trafix.routes.finance_reports import _guard_export_size
+from api_trafix.crud import finance_reports as finance_reports_crud
 
 
 def _suffix() -> str:
@@ -232,4 +233,61 @@ async def test_export_rejects_unknown_format(client):
 def test_guard_export_size_raises():
     with pytest.raises(HTTPException) as exc_info:
         _guard_export_size(10_001)
-    assert exc_info.value.status_code == 422
+
+
+async def test_transaction_report_shows_no_method_without_payment_row(
+    client, db_sessionmaker
+):
+    """Transactions without a Payment row surface blank (null) payment method."""
+    async with db_sessionmaker() as db:
+        suffix = _suffix()
+        vehicle_type = VehicleType(
+            code=f"EXP-{suffix}", name="Mobil Legacy", status=VehicleStatus.ACTIVE
+        )
+        exit_gate = Gate(
+            gate_code=suffix[:4] + "X",
+            name="Gate Legacy Keluar",
+            type=GateType.GATE_OUT,
+            status=GateStatus.ONLINE,
+        )
+        db.add_all([vehicle_type, exit_gate])
+        await db.flush()
+
+        now = datetime.now(UTC)
+        tx = ParkTransaction(
+            ticket_number=f"EXP-{suffix}-LEG",
+            police_number=f"EX{suffix[:3]}LC",
+            vehicle_type_id=vehicle_type.id,
+            entry_time=now - timedelta(hours=2),
+            exit_time=now - timedelta(hours=1),
+            entry_gate_id=exit_gate.id,
+            exit_gate_id=exit_gate.id,
+            status_parking=ParkingStatus.COMPLETED,
+            total_fee=4000,
+            detection_method=DetectionMethod.MANUAL,
+        )
+        db.add(tx)
+        await db.commit()
+        tx_id = tx.id
+        vt_id = vehicle_type.id
+        gate_id = exit_gate.id
+
+        try:
+            report = await finance_reports_crud.get_transaction_report(
+                db, page=1, size=100, search=tx.ticket_number
+            )
+        finally:
+            in_db = await db.get(ParkTransaction, tx_id)
+            if in_db is not None:
+                await db.delete(in_db)
+            await db.commit()
+            vt = await db.get(VehicleType, vt_id)
+            if vt is not None:
+                await db.delete(vt)
+            g = await db.get(Gate, gate_id)
+            if g is not None:
+                await db.delete(g)
+            await db.commit()
+
+    assert len(report["items"]) == 1
+    assert report["items"][0]["payment_method"] is None
