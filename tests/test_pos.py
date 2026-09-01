@@ -36,6 +36,7 @@ from api_trafix.models import (
     ParkingStatus,
     ParkTransaction,
     Payment,
+    PaymentMethod,
     PaymentStatus,
     RateStatus,
     Shift,
@@ -451,6 +452,62 @@ async def test_settle_uses_session_context(pos):
         assert tx.status_parking == ParkingStatus.COMPLETED
         assert str(tx.exit_operator_id) == str(operator.id)
         assert str(tx.exit_shift_id) == session["shift_id"]
+
+
+async def test_settle_records_chosen_payment_method(pos):
+    # The operator picks QRIS at checkout; it must be persisted as a Payment
+    # (SUCCESS) row so the finance report's "metode pembayaran" is not null.
+    token, _, _ = await _open_session(pos)
+    code = await _enter(pos)
+    async with pos.db() as db:
+        await _backdate(db, code)
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/settle",
+        json={"transaction_code": code, "payment_method": "QRIS"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "success"
+
+    async with pos.db() as db:
+        tx = await db.scalar(
+            select(ParkTransaction).where(ParkTransaction.ticket_number == code)
+        )
+        assert tx is not None
+        payment = await db.scalar(
+            select(Payment).where(Payment.park_transaction_id == tx.id)
+        )
+        assert payment is not None
+        assert payment.method == PaymentMethod.QRIS
+        assert payment.status == PaymentStatus.SUCCESS
+        assert payment.amount == tx.total_fee
+
+
+async def test_settle_without_payment_method_leaves_no_payment(pos):
+    # Backward compatibility: settling without a method must still work, but
+    # no Payment row is written (report shows null) — matches the current DB.
+    token, _, _ = await _open_session(pos)
+    code = await _enter(pos)
+    async with pos.db() as db:
+        await _backdate(db, code)
+
+    resp = await pos.client.post(
+        "/api/pos/transactions/settle",
+        json={"transaction_code": code},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+
+    async with pos.db() as db:
+        tx = await db.scalar(
+            select(ParkTransaction).where(ParkTransaction.ticket_number == code)
+        )
+        assert tx is not None
+        payment = await db.scalar(
+            select(Payment).where(Payment.park_transaction_id == tx.id)
+        )
+        assert payment is None
 
 
 async def test_settle_lost_ticket_with_session_context(pos):

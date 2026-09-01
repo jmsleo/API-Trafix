@@ -120,6 +120,8 @@ def parse_payment_method(raw: str | None) -> tuple[PaymentMethod | None, str | N
     if raw is None:
         return None, None
     key = raw.strip().upper()
+    if not key:
+        return None, None
     mapping = {
         "TUNAI": (PaymentMethod.CASH, "cash"),
         "QRIS": (PaymentMethod.QRIS, "qris"),
@@ -1202,6 +1204,8 @@ class GateCycleService:
                     )
                 )
             transaction.transaction_method = "normal"
+            if pm_method is None:
+                transaction.payment_type = ""
 
             self._log_event(
                 session,
@@ -1373,7 +1377,7 @@ class GateCycleService:
                     paid_at=now,
                     cam_in="-",
                     camin_lpr="-",
-                    payment_type=pm_label or "cash",
+                    payment_type=pm_label or "",
                     keterangan="tiket hilang",
                     transaction_method="lost",
                     detection_method=DetectionMethodForWire.MANUAL,
@@ -1583,7 +1587,7 @@ class GateCycleService:
                 paid_at=now,
                 cam_in="-",
                 camin_lpr="-",
-                payment_type=pm_label or "cash",
+                payment_type=pm_label or "",
                 keterangan="tiket tidak cetak",
                 transaction_method="manual",
                 detection_method=DetectionMethodForWire.MANUAL,
