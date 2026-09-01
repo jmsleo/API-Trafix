@@ -12,6 +12,7 @@ from api_trafix.core.dependencies import (
     get_current_user,
 )
 from api_trafix.crud import gate as gate_crud
+from api_trafix.crud import operator_shift_assignment as assignment_crud
 from api_trafix.crud import operator_session as crud
 from api_trafix.crud import shift as shift_crud
 from api_trafix.models import Gate, GateType, OperatorSessionStatus, User, UserRole
@@ -101,6 +102,12 @@ async def start_operator_session(
     shift = await shift_crud.get_by_id(db, payload.shift_id)
     if shift is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan")
+
+    if not await assignment_crud.has_active_assignment(db, operator.id, payload.shift_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Anda tidak dijadwalkan pada shift ini",
+        )
 
     gate = await _resolve_exit_gate(db, payload.gate_id)
 
