@@ -57,6 +57,8 @@ async def get_all(
         stmt = stmt.where(condition)
         count_stmt = count_stmt.where(condition)
     if date_to is not None:
+        if date_to.hour == 0 and date_to.minute == 0 and date_to.second == 0:
+            date_to = date_to.replace(hour=23, minute=59, second=59, microsecond=999999)
         condition = AuditLog.created_at <= _coerce_utc(date_to)
         stmt = stmt.where(condition)
         count_stmt = count_stmt.where(condition)
