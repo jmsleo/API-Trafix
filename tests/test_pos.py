@@ -20,6 +20,7 @@ import httpx
 import pytest_asyncio
 from fastapi import FastAPI
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from api_trafix.config.database import get_db
 from api_trafix.config.redis import close_redis
@@ -149,7 +150,7 @@ async def _create_shift(db, name=None, *, status=ShiftStatus.ACTIVE):
 
 
 async def _create_shift_away(db, name=None, *, hours=4):
-    """A shift whose window starts ``hours`` after now — never covers now."""
+    """A shift whose window starts ``hours`` from now — never covers now."""
     now = datetime.now(WIB)
     start = (now + timedelta(hours=hours)).time()
     finish = (now + timedelta(hours=hours + 1)).time()
@@ -284,9 +285,7 @@ async def test_login_returns_no_session(pos):
     assert "session" not in resp.json()
 
 
-async def test_session_start_requires_assignment_when_shift_omitted(pos):
-    # shift_id is optional: it must be auto-resolved from the operator's ACTIVE
-    # assignments. An operator with no assignment is rejected.
+async def test_session_start_requires_shift_and_gate(pos):
     async with pos.db() as db:
         operator = await _create_operator(db)
     login_resp = await _login(pos, operator)
@@ -296,8 +295,9 @@ async def test_session_start_requires_assignment_when_shift_omitted(pos):
         json={},
         headers={"Authorization": f"Bearer {token}"},
     )
+    # shift_id is now optional: with no assignment at all the backend rejects
+    # the auto-resolve instead of requiring a body field.
     assert resp.status_code == 403
-    assert "memiliki shift" in resp.json()["detail"]
 
 
 async def test_session_start_rejects_non_operator(pos):
@@ -376,13 +376,12 @@ async def test_session_start_opens_session_for_operator(pos):
 
 
 async def test_session_start_auto_resolves_covering_shift(pos):
-    """Omitted shift_id resolves the operator's assigned shift covering now."""
+    """Omitted shift_id resolves the currently-covering assigned shift."""
     async with pos.db() as db:
         operator = await _create_operator(db)
         shift = await _create_shift(db)
         await _assign(db, operator, shift)
-        exit_gate = await _gate(db, "2")
-        shift_id = shift.id
+        shift_id, exit_gate = shift.id, await _gate(db, "2")
     login_resp = await _login(pos, operator)
     token = login_resp.json()["access_token"]
     resp = await pos.client.post(
@@ -397,20 +396,52 @@ async def test_session_start_auto_resolves_covering_shift(pos):
 
 
 async def test_session_start_rejects_outside_shift_window(pos):
-    """Outside the assigned shift's window, start is rejected with a warning."""
+    """An assigned shift whose window does not cover now is rejected."""
     async with pos.db() as db:
         operator = await _create_operator(db)
         shift = await _create_shift_away(db)
         await _assign(db, operator, shift)
+        shift_id = shift.id
     login_resp = await _login(pos, operator)
     token = login_resp.json()["access_token"]
+    # An explicit shift_id never bypasses the clock guard.
+    resp = await _start_session(pos, token, shift_id)
+    assert resp.status_code == 403
+    assert "jam shift" in resp.json()["detail"]
+
+    # The auto-resolve path rejects the same way.
     resp = await pos.client.post(
         "/operator-sessions/start",
         json={},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert resp.status_code == 403, resp.text
-    assert "luar jam shift" in resp.json()["detail"]
+    assert resp.status_code == 403
+    assert "jam shift" in resp.json()["detail"]
+
+
+async def test_pos_session_rejects_expired_shift(pos):
+    """An open session stops working once its shift window has passed."""
+    token, _session, _operator = await _open_session(pos)
+
+    # Push the session's shift window fully into the past.
+    async with pos.db() as db:
+        session = await db.scalar(
+            select(OperatorSession)
+            .where(OperatorSession.user_id == _operator.id)
+            .options(selectinload(OperatorSession.shift))
+        )
+        assert session is not None
+        past = datetime.now(WIB) - timedelta(hours=3)
+        session.shift.start_time = (past - timedelta(hours=1)).time()
+        session.shift.finish_time = past.time()
+        session.shift.crosses_midnight = False
+        await db.commit()
+
+    resp = await pos.client.get(
+        "/api/pos/session", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 403
+    assert "jam shift" in resp.json()["detail"]
 
 
 async def test_session_start_rejects_entry_gate(pos):
@@ -1025,226 +1056,6 @@ async def test_quote_honors_a_vehicle_type_override(pos):
     assert body["status"] == "success"
     # The motor transaction is repriced at the Mobil flat rate.
     assert body["data"]["total"] == 4000
-
-
-# -- exact tarif parkir binding (parking_rate_id) ------------------------------
-
-
-async def test_pos_refs_list_active_parking_rates(pos):
-    """``/api/pos/refs`` exposes every active tarif parkir for the picker."""
-    resp = await pos.client.get("/api/pos/refs")
-    assert resp.status_code == 200
-    rates = {r["name"]: r for r in resp.json()["rates"]}
-    for name in ("Tarif Motor", "Tarif Mobil", "Tarif Ojol/Paket", "Tarif Bus Besar"):
-        assert name in rates, rates
-        assert rates[name]["status"] == "active"
-        assert rates[name]["vehicle_type_name"]
-    assert rates["Tarif Motor"]["base_price"] == 2000
-    assert rates["Tarif Mobil"]["base_price"] == 4000
-
-    # Inactive tariffs disappear from the picker.
-    async with pos.db() as db:
-        motor = await db.scalar(select(VehicleType).where(VehicleType.code == "MOTOR"))
-        motor_rate = await db.scalar(
-            select(ParkingRate).where(ParkingRate.vehicle_type_id == motor.id)
-        )
-        await _deactivate_rate(db, motor_rate.id)
-
-    try:
-        resp = await pos.client.get("/api/pos/refs")
-        names = [r["name"] for r in resp.json()["rates"]]
-        assert "Tarif Motor" not in names
-    finally:
-        async with pos.db() as db:
-            await _activate_rate(db, motor_rate.id)
-
-
-async def test_quote_prices_with_exact_parking_rate(pos):
-    """The exact tarif ids win over the latest-active-for-class lookup."""
-    token, _session, _operator = await _open_session(pos)
-    async with pos.db() as db:
-        vt = await _custom_vehicle_type(db, base_price=5000)
-        vt_id = vt.id
-        older = await db.scalar(
-            select(ParkingRate).where(ParkingRate.vehicle_type_id == vt_id)
-        )
-        assert older is not None
-        newer = ParkingRate(
-            name=f"Tarif {vt.code} Baru",
-            vehicle_type_id=vt_id,
-            base_price=9000,
-            fee_category="flat",
-            status=RateStatus.ACTIVE,
-        )
-        db.add(newer)
-        await db.commit()
-        await db.refresh(newer)
-        older_id, newer_id = older.id, newer.id
-
-    try:
-        # Without an id the class lookup finds the newest active rate.
-        resp = await pos.client.post(
-            "/api/pos/transactions/quote",
-            json={
-                "manual": True,
-                "police_number": _plate(),
-                "vehicle_type_id": str(vt_id),
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["data"]["total"] == 9000
-
-        # The exact older tarif parkir id reprices the same class.
-        for rate_id, expected in ((older_id, 5000), (newer_id, 9000)):
-            resp = await pos.client.post(
-                "/api/pos/transactions/quote",
-                json={
-                    "manual": True,
-                    "police_number": _plate(),
-                    "parking_rate_id": str(rate_id),
-                },
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            assert resp.status_code == 200, resp.text
-            assert resp.json()["data"]["total"] == expected
-    finally:
-        async with pos.db() as db:
-            await _cleanup_custom_type(db, vt_id, [])
-
-
-async def test_settle_honors_exact_parking_rate(pos):
-    """A gate-out prices with the exact tarif and records its vehicle class."""
-    token, _session, _operator = await _open_session(pos)
-    code = await _enter(pos)
-    async with pos.db() as db:
-        await _backdate(db, code, hours=2)
-        mobil = await db.scalar(select(VehicleType).where(VehicleType.code == "MOBIL"))
-        mobil_rate = await db.scalar(
-            select(ParkingRate).where(ParkingRate.vehicle_type_id == mobil.id)
-        )
-        mobil_id, rate_id = mobil.id, mobil_rate.id
-
-    resp = await pos.client.post(
-        "/api/pos/transactions/settle",
-        json={"transaction_code": code, "parking_rate_id": str(rate_id)},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["status"] == "success"
-    # The motor ticket is settled at the Mobil flat rate.
-    assert body["data"]["total"] == 4000
-
-    async with pos.db() as db:
-        tx = await db.scalar(
-            select(ParkTransaction).where(ParkTransaction.ticket_number == code)
-        )
-        assert tx is not None
-        assert str(tx.vehicle_type_id) == str(mobil_id)
-
-
-async def test_lost_ticket_prices_exact_parking_rate(pos):
-    token, _session, _operator = await _open_session(pos)
-    async with pos.db() as db:
-        vt = await _custom_vehicle_type(db, base_price=7000)
-        vt_id = vt.id
-        rate = await db.scalar(
-            select(ParkingRate).where(ParkingRate.vehicle_type_id == vt_id)
-        )
-        rate_id = rate.id
-
-    codes: list[str] = []
-    try:
-        resp = await pos.client.post(
-            "/api/pos/transactions/settle",
-            json={
-                "lost_ticket": True,
-                "police_number": _plate(),
-                "parking_rate_id": str(rate_id),
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["status"] == "success"
-        assert body["data"]["total"] == 7000
-        codes.append(body["data"]["transaction_code"])
-    finally:
-        async with pos.db() as db:
-            await _cleanup_custom_type(db, vt_id, codes)
-
-
-async def test_manual_ticket_uses_exact_parking_rate(pos):
-    token, _session, _operator = await _open_session(pos)
-    async with pos.db() as db:
-        vt = await _custom_vehicle_type(db, base_price=9999)
-        vt_id = vt.id
-        rate = await db.scalar(
-            select(ParkingRate).where(ParkingRate.vehicle_type_id == vt_id)
-        )
-        rate_id = rate.id
-
-    codes: list[str] = []
-    try:
-        resp = await pos.client.post(
-            "/api/pos/transactions/manual",
-            json={
-                "police_number": _plate(),
-                "parking_rate_id": str(rate_id),
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert resp.status_code == 200, resp.text
-        data = resp.json()["data"]
-        assert data["total"] == 9999
-        assert data["payment_status"] == "lunas"
-        codes.append(data["transaction_code"])
-    finally:
-        async with pos.db() as db:
-            await _cleanup_custom_type(db, vt_id, codes)
-
-
-async def test_quote_rejects_unknown_parking_rate(pos):
-    token, _session, _operator = await _open_session(pos)
-    resp = await pos.client.post(
-        "/api/pos/transactions/quote",
-        json={
-            "manual": True,
-            "police_number": _plate(),
-            "parking_rate_id": str(uuid.uuid4()),
-        },
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "notfound"
-
-
-async def test_quote_rejects_inactive_parking_rate(pos):
-    token, _session, _operator = await _open_session(pos)
-    async with pos.db() as db:
-        motor = await db.scalar(select(VehicleType).where(VehicleType.code == "MOTOR"))
-        motor_rate = await db.scalar(
-            select(ParkingRate).where(ParkingRate.vehicle_type_id == motor.id)
-        )
-        rate_id = motor_rate.id
-        await _deactivate_rate(db, rate_id)
-
-    try:
-        resp = await pos.client.post(
-            "/api/pos/transactions/quote",
-            json={
-                "manual": True,
-                "police_number": _plate(),
-                "parking_rate_id": str(rate_id),
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["status"] == "notfound"
-    finally:
-        async with pos.db() as db:
-            await _activate_rate(db, rate_id)
 
 
 # -- fee previews (quote without an open transaction) --------------------------

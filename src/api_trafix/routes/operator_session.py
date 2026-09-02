@@ -40,6 +40,8 @@ async def _resolve_shift(
     from the operator's ACTIVE assignments whose time window covers the current
     moment — logging in outside that window is rejected with a warning.
     """
+    now = datetime.now(WIB)
+
     if payload.shift_id is not None:
         shift = await shift_crud.get_by_id(db, payload.shift_id)
         if shift is None:
@@ -51,6 +53,16 @@ async def _resolve_shift(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Anda tidak dijadwalkan pada shift ini",
             )
+        if not shift_covers_datetime(
+            now, shift.start_time, shift.finish_time, shift.crosses_midnight
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Anda berada di luar jam shift aktif. Mulai sesi hanya dapat "
+                    "dilakukan pada jam shift yang ditugaskan."
+                ),
+            )
         payload.shift_id = shift.id
         return shift
 
@@ -60,7 +72,6 @@ async def _resolve_shift(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Anda tidak memiliki shift yang ditugaskan. Hubungi admin.",
         )
-    now = datetime.now(WIB)
     matching = [
         assignment
         for assignment in assignments

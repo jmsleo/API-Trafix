@@ -46,6 +46,17 @@ def shift_covers_minutes(
     return (set(range(s, f)),)
 
 
+def shift_covers_datetime(
+    dt: datetime, start: time, finish: time, crosses_midnight: bool
+) -> bool:
+    """Whether ``dt``'s clock time falls inside the shift's window."""
+    minute = dt.hour * 60 + dt.minute
+    return any(
+        minute in covered
+        for covered in shift_covers_minutes(start, finish, crosses_midnight)
+    )
+
+
 def shifts_overlap(
     a_start: time,
     a_finish: time,
