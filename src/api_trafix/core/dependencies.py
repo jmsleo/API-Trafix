@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 
 import jwt
 import redis.exceptions
@@ -13,6 +14,9 @@ from api_trafix.config.database import get_db
 from api_trafix.config.redis import get_redis
 from api_trafix.core.security import ACCESS_TOKEN_TYPE, decode_token
 from api_trafix.models import OperatorSession, OperatorSessionStatus, User, UserRole
+from api_trafix.services.shift_overlap import shift_covers_datetime
+
+WIB = timezone(timedelta(hours=7))
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -146,6 +150,9 @@ async def get_active_operator_session(
 
     Every POS transaction is attributed to this session: the operator, shift
     and gate are taken from it instead of being trusted from the request body.
+    The session is only usable while its shift window covers the current WIB
+    time — a session opened on an earlier shift stops working once that shift
+    ends.
     """
     session = await db.scalar(
         select(OperatorSession)
@@ -163,5 +170,19 @@ async def get_active_operator_session(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tidak ada sesi operator aktif — mulai sesi terlebih dahulu sebelum mengoperasikan gerbang",
+        )
+    shift = session.shift
+    if shift is None or not shift_covers_datetime(
+        datetime.now(WIB),
+        shift.start_time,
+        shift.finish_time,
+        shift.crosses_midnight,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Sesi kerja sudah di luar jam shift aktif. Mulai sesi kembali "
+                "pada jam shift yang ditugaskan."
+            ),
         )
     return session

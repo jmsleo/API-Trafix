@@ -21,7 +21,10 @@ class GateBrief(BaseModel):
 class OperatorSessionStart(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    shift_id: UUID
+    # Optional: when omitted the backend resolves the operator's CURRENT
+    # assigned shift (the one whose window covers "now" in WIB) and rejects
+    # login outside any shift window.
+    shift_id: UUID | None = None
     # Optional: when omitted the backend resolves the single configured exit
     # gate automatically — operators serve gate-out only.
     gate_id: UUID | None = None

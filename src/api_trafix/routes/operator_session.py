@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -17,6 +17,7 @@ from api_trafix.crud import operator_session as crud
 from api_trafix.crud import shift as shift_crud
 from api_trafix.models import Gate, GateType, OperatorSessionStatus, User, UserRole
 from api_trafix.services.audit import log_action
+from api_trafix.services.shift_overlap import shift_covers_datetime
 from api_trafix.schemas.operator_session import (
     OperatorSessionPage,
     OperatorSessionRead,
@@ -24,6 +25,72 @@ from api_trafix.schemas.operator_session import (
 )
 
 router = APIRouter(prefix="/operator-sessions", tags=["Operator Sessions"])
+
+WIB = timezone(timedelta(hours=7))
+
+
+async def _resolve_shift(
+    db: AsyncSession, operator: User, payload: OperatorSessionStart
+):
+    """Resolve and validate the shift a session opens on.
+
+    When ``payload.shift_id`` is given it must still be one the operator is
+    assigned to AND its window must cover the current WIB time — an explicit
+    id never bypasses the out-of-shift guard. When omitted, the current
+    assigned shift (the one covering now) is resolved automatically.
+    """
+    now = datetime.now(WIB)
+
+    if payload.shift_id is not None:
+        shift = await shift_crud.get_by_id(db, payload.shift_id)
+        if shift is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan"
+            )
+        if not await assignment_crud.has_active_assignment(db, operator.id, shift.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anda tidak dijadwalkan pada shift ini",
+            )
+        if not shift_covers_datetime(
+            now, shift.start_time, shift.finish_time, shift.crosses_midnight
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Anda berada di luar jam shift aktif. Mulai sesi hanya dapat "
+                    "dilakukan pada jam shift yang ditugaskan."
+                ),
+            )
+        payload.shift_id = shift.id
+        return shift
+
+    assignments = await assignment_crud.get_active_by_operator(db, operator.id)
+    if not assignments:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Anda tidak memiliki shift yang ditugaskan. Hubungi admin.",
+        )
+    matching = [
+        assignment
+        for assignment in assignments
+        if shift_covers_datetime(
+            now,
+            assignment.shift.start_time,
+            assignment.shift.finish_time,
+            assignment.shift.crosses_midnight,
+        )
+    ]
+    if not matching:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Anda berada di luar jam shift aktif. Mulai sesi hanya dapat "
+                "dilakukan pada jam shift yang ditugaskan."
+            ),
+        )
+    payload.shift_id = matching[0].shift.id
+    return matching[0].shift
 
 
 @router.get("/", response_model=OperatorSessionPage)
@@ -99,15 +166,7 @@ async def start_operator_session(
     db: AsyncSession = Depends(get_db),
     operator: User = Depends(get_current_operator),
 ):
-    shift = await shift_crud.get_by_id(db, payload.shift_id)
-    if shift is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shift tidak ditemukan")
-
-    if not await assignment_crud.has_active_assignment(db, operator.id, payload.shift_id):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Anda tidak dijadwalkan pada shift ini",
-        )
+    shift = await _resolve_shift(db, operator, payload)
 
     gate = await _resolve_exit_gate(db, payload.gate_id)
 

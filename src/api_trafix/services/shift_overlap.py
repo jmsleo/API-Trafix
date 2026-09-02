@@ -9,7 +9,7 @@ overlap.
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import datetime, time
 
 from api_trafix.models.shifts import Shift
 
@@ -33,6 +33,17 @@ def shift_covers_minutes(
         )
     # [start, finish) with finish > start
     return (set(range(s, f)),)
+
+
+def shift_covers_datetime(
+    dt: datetime, start: time, finish: time, crosses_midnight: bool
+) -> bool:
+    """Whether ``dt``'s clock time falls inside the shift's window."""
+    minute = dt.hour * 60 + dt.minute
+    return any(
+        minute in covered
+        for covered in shift_covers_minutes(start, finish, crosses_midnight)
+    )
 
 
 def shifts_overlap(

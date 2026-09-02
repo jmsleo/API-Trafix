@@ -20,6 +20,7 @@ import httpx
 import pytest_asyncio
 from fastapi import FastAPI
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from api_trafix.config.database import get_db
 from api_trafix.config.redis import close_redis
@@ -141,6 +142,24 @@ async def _create_shift(db, name=None, *, status=ShiftStatus.ACTIVE):
         finish_time=finish,
         crosses_midnight=start >= finish,
         status=status,
+    )
+    db.add(shift)
+    await db.commit()
+    await db.refresh(shift)
+    return shift
+
+
+async def _create_shift_away(db, name=None, *, hours=4):
+    """A shift whose window starts ``hours`` from now — never covers now."""
+    now = datetime.now(WIB)
+    start = (now + timedelta(hours=hours)).time()
+    finish = (now + timedelta(hours=hours + 1)).time()
+    shift = Shift(
+        name=name or f"shift-away-{_suffix()}",
+        start_time=start,
+        finish_time=finish,
+        crosses_midnight=start >= finish,
+        status=ShiftStatus.ACTIVE,
     )
     db.add(shift)
     await db.commit()
@@ -276,7 +295,9 @@ async def test_session_start_requires_shift_and_gate(pos):
         json={},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert resp.status_code == 422
+    # shift_id is now optional: with no assignment at all the backend rejects
+    # the auto-resolve instead of requiring a body field.
+    assert resp.status_code == 403
 
 
 async def test_session_start_rejects_non_operator(pos):
@@ -352,6 +373,75 @@ async def test_session_start_opens_session_for_operator(pos):
             select(OperatorSession).where(OperatorSession.user_id == operator.id)
         )
         assert active is not None and active.status.value == "active"
+
+
+async def test_session_start_auto_resolves_covering_shift(pos):
+    """Omitted shift_id resolves the currently-covering assigned shift."""
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift(db)
+        await _assign(db, operator, shift)
+        shift_id, exit_gate = shift.id, await _gate(db, "2")
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await pos.client.post(
+        "/operator-sessions/start",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    session = resp.json()
+    assert session["shift_id"] == str(shift_id)
+    assert session["gate_id"] == str(exit_gate.id)
+
+
+async def test_session_start_rejects_outside_shift_window(pos):
+    """An assigned shift whose window does not cover now is rejected."""
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift_away(db)
+        await _assign(db, operator, shift)
+        shift_id = shift.id
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    # An explicit shift_id never bypasses the clock guard.
+    resp = await _start_session(pos, token, shift_id)
+    assert resp.status_code == 403
+    assert "jam shift" in resp.json()["detail"]
+
+    # The auto-resolve path rejects the same way.
+    resp = await pos.client.post(
+        "/operator-sessions/start",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+    assert "jam shift" in resp.json()["detail"]
+
+
+async def test_pos_session_rejects_expired_shift(pos):
+    """An open session stops working once its shift window has passed."""
+    token, _session, _operator = await _open_session(pos)
+
+    # Push the session's shift window fully into the past.
+    async with pos.db() as db:
+        session = await db.scalar(
+            select(OperatorSession)
+            .where(OperatorSession.user_id == _operator.id)
+            .options(selectinload(OperatorSession.shift))
+        )
+        assert session is not None
+        past = datetime.now(WIB) - timedelta(hours=3)
+        session.shift.start_time = (past - timedelta(hours=1)).time()
+        session.shift.finish_time = past.time()
+        session.shift.crosses_midnight = False
+        await db.commit()
+
+    resp = await pos.client.get(
+        "/api/pos/session", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 403
+    assert "jam shift" in resp.json()["detail"]
 
 
 async def test_session_start_rejects_entry_gate(pos):
