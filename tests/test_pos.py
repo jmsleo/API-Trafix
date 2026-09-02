@@ -148,6 +148,24 @@ async def _create_shift(db, name=None, *, status=ShiftStatus.ACTIVE):
     return shift
 
 
+async def _create_shift_away(db, name=None, *, hours=4):
+    """A shift whose window starts ``hours`` after now — never covers now."""
+    now = datetime.now(WIB)
+    start = (now + timedelta(hours=hours)).time()
+    finish = (now + timedelta(hours=hours + 1)).time()
+    shift = Shift(
+        name=name or f"shift-away-{_suffix()}",
+        start_time=start,
+        finish_time=finish,
+        crosses_midnight=start >= finish,
+        status=ShiftStatus.ACTIVE,
+    )
+    db.add(shift)
+    await db.commit()
+    await db.refresh(shift)
+    return shift
+
+
 async def _assign(db, operator, shift):
     db.add(
         OperatorShiftAssignment(
@@ -266,7 +284,9 @@ async def test_login_returns_no_session(pos):
     assert "session" not in resp.json()
 
 
-async def test_session_start_requires_shift_and_gate(pos):
+async def test_session_start_requires_assignment_when_shift_omitted(pos):
+    # shift_id is optional: it must be auto-resolved from the operator's ACTIVE
+    # assignments. An operator with no assignment is rejected.
     async with pos.db() as db:
         operator = await _create_operator(db)
     login_resp = await _login(pos, operator)
@@ -276,7 +296,8 @@ async def test_session_start_requires_shift_and_gate(pos):
         json={},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 403
+    assert "memiliki shift" in resp.json()["detail"]
 
 
 async def test_session_start_rejects_non_operator(pos):
@@ -352,6 +373,44 @@ async def test_session_start_opens_session_for_operator(pos):
             select(OperatorSession).where(OperatorSession.user_id == operator.id)
         )
         assert active is not None and active.status.value == "active"
+
+
+async def test_session_start_auto_resolves_covering_shift(pos):
+    """Omitted shift_id resolves the operator's assigned shift covering now."""
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift(db)
+        await _assign(db, operator, shift)
+        exit_gate = await _gate(db, "2")
+        shift_id = shift.id
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await pos.client.post(
+        "/operator-sessions/start",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201, resp.text
+    session = resp.json()
+    assert session["shift_id"] == str(shift_id)
+    assert session["gate_id"] == str(exit_gate.id)
+
+
+async def test_session_start_rejects_outside_shift_window(pos):
+    """Outside the assigned shift's window, start is rejected with a warning."""
+    async with pos.db() as db:
+        operator = await _create_operator(db)
+        shift = await _create_shift_away(db)
+        await _assign(db, operator, shift)
+    login_resp = await _login(pos, operator)
+    token = login_resp.json()["access_token"]
+    resp = await pos.client.post(
+        "/operator-sessions/start",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403, resp.text
+    assert "luar jam shift" in resp.json()["detail"]
 
 
 async def test_session_start_rejects_entry_gate(pos):
