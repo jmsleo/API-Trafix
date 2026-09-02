@@ -25,6 +25,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from api_trafix.config.database import get_db
 from api_trafix.config.redis import get_redis
@@ -73,6 +74,22 @@ async def _active_base_price(db: AsyncSession, vehicle_type_id: UUID) -> int | N
     return rate.base_price if rate is not None else None
 
 
+async def _active_rates(db: AsyncSession) -> list[ParkingRate]:
+    """Every active tarif parkir, newest first, with its vehicle type loaded."""
+    return list(
+        (
+            await db.execute(
+                select(ParkingRate)
+                .where(ParkingRate.status == RateStatus.ACTIVE)
+                .options(selectinload(ParkingRate.vehicle_type))
+                .order_by(ParkingRate.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def _operator_query_user(
     current_user: User = Depends(get_current_user_query),
 ) -> User:
@@ -97,6 +114,9 @@ class PosSettleRequest(BaseModel):
     vehicle_id: int | None = None
     # An admin-managed vehicle class (wins over the legacy wire id).
     vehicle_type_id: UUID | None = None
+    # The exact admin-managed tarif parkir to price with (wins over the
+    # vehicle class lookup, which falls back to the latest active rate).
+    parking_rate_id: UUID | None = None
     # Quote-only: price a manual ticket even though no transaction exists yet.
     manual: bool = False
     # Payment method chosen by the cashier (TUNAI / QRIS / E-MONEY).
@@ -124,6 +144,9 @@ class PosManualRequest(BaseModel):
     vehicle_id: int | None = None
     # An admin-managed vehicle class (wins over the legacy wire id).
     vehicle_type_id: UUID | None = None
+    # The exact admin-managed tarif parkir to price with (wins over the
+    # vehicle class lookup).
+    parking_rate_id: UUID | None = None
     total: float | None = None
     payment_method: str | None = None
 
@@ -210,6 +233,7 @@ async def operator_references(
     vehicle_types, _ = await vehicle_type_crud.get_all(
         db, status=VehicleStatus.ACTIVE, page_size=100
     )
+    rates = await _active_rates(db)
     return {
         "shifts": [
             {
@@ -247,6 +271,26 @@ async def operator_references(
             }
             for vt in vehicle_types
         ],
+        # Every active tarif parkir — the operator's "pilih kendaraan" list
+        # is built from these, so the price shown is the exact tariff that
+        # will be charged (passed back as parking_rate_id).
+        "rates": [
+            {
+                "id": rate.id,
+                "name": rate.name,
+                "vehicle_type_id": rate.vehicle_type_id,
+                "vehicle_type_name": rate.vehicle_type.name
+                if rate.vehicle_type is not None
+                else None,
+                "base_price": rate.base_price,
+                "fee_category": rate.fee_category,
+                "ticket_charge": rate.ticket_charge,
+                "stay_charge": rate.stay_charge,
+                "status": rate.status.value,
+                "updated_at": rate.updated_at.isoformat() if rate.updated_at else None,
+            }
+            for rate in rates
+        ],
     }
 
 
@@ -266,6 +310,7 @@ async def quote_transaction(
         result = await request.app.state.gate_cycle.preview_fee(
             kind="manual",
             vehicle_type_id=payload.vehicle_type_id,
+            parking_rate_id=payload.parking_rate_id,
             vehicle_id=payload.vehicle_id,
         )
     else:
@@ -275,6 +320,7 @@ async def quote_transaction(
             lost=payload.lost_ticket,
             vehicle_id=payload.vehicle_id,
             vehicle_type_id=payload.vehicle_type_id,
+            parking_rate_id=payload.parking_rate_id,
         )
         if result.status == service.STATUS_NOT_FOUND and payload.lost_ticket:
             # No open transaction behind this plate — for lost tickets that
@@ -282,6 +328,7 @@ async def quote_transaction(
             result = await request.app.state.gate_cycle.preview_fee(
                 kind="lost",
                 vehicle_type_id=payload.vehicle_type_id,
+                parking_rate_id=payload.parking_rate_id,
                 vehicle_id=payload.vehicle_id,
             )
     if result.status == service.STATUS_NOT_FOUND:
@@ -308,6 +355,7 @@ async def settle_transaction(
             plate=payload.police_number,
             vehicle_id=payload.vehicle_id,
             vehicle_type_id=payload.vehicle_type_id,
+            parking_rate_id=payload.parking_rate_id,
             payment_method=payload.payment_method,
             exit_operator_id=operator_session.user_id,
             exit_shift_id=operator_session.shift_id,
@@ -320,6 +368,7 @@ async def settle_transaction(
             lost=payload.lost_ticket,
             vehicle_id=payload.vehicle_id,
             vehicle_type_id=payload.vehicle_type_id,
+            parking_rate_id=payload.parking_rate_id,
             payment_method=payload.payment_method,
             exit_operator_id=operator_session.user_id,
             exit_shift_id=operator_session.shift_id,
@@ -355,6 +404,7 @@ async def manual_transaction(
         police_number=payload.police_number,
         vehicle_id=payload.vehicle_id,
         vehicle_type_id=payload.vehicle_type_id,
+        parking_rate_id=payload.parking_rate_id,
         total=payload.total,
         payment_method=payload.payment_method,
         gate=operator_session.gate.gate_code,

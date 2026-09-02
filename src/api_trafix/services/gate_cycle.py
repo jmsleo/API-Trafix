@@ -935,6 +935,7 @@ class GateCycleService:
         lost: bool = False,
         vehicle_id: int | None = None,
         vehicle_type_id: UUID | None = None,
+        parking_rate_id: UUID | None = None,
     ) -> GateOutResult:
         """What would this vehicle pay? Read-only — nothing is written.
 
@@ -954,6 +955,7 @@ class GateCycleService:
                 lost=lost,
                 vehicle_id=vehicle_id,
                 vehicle_type_id=vehicle_type_id,
+                parking_rate_id=parking_rate_id,
             )
 
     async def quote_gateout_image(self, *, plate: str) -> LprGateOutQuote | None:
@@ -998,16 +1000,29 @@ class GateCycleService:
         lost: bool = False,
         vehicle_id: int | None = None,
         vehicle_type_id: UUID | None = None,
+        parking_rate_id: UUID | None = None,
     ) -> GateOutResult:
-        # The cashier's selection wins when given (explicit vehicle_type_id
-        # first, then the legacy wire id); otherwise the class recorded at
-        # entry decides.
+        # The cashier's selection wins when given (explicit parking_rate_id
+        # first, then the vehicle class UUID, then the legacy wire id);
+        # otherwise the class recorded at entry decides.
         entry_vehicle_id = await vehicle_id_of(db, transaction.vehicle_type_id)
 
         tariff_row = None
         chosen_wire_id: int | None = None
         chosen = None
-        if vehicle_type_id is not None:
+        if parking_rate_id is not None:
+            rate = await db.get(ParkingRate, parking_rate_id)
+            if rate is None or rate.status != RateStatus.ACTIVE:
+                return GateOutResult(
+                    status=STATUS_NOT_FOUND,
+                    message="Tarif parkir tidak ditemukan atau nonaktif",
+                )
+            rate_owner = await db.get(VehicleType, rate.vehicle_type_id)
+            if rate_owner is not None:
+                chosen = rate_owner
+                chosen_wire_id = await vehicle_id_of(db, chosen.id)
+            tariff_row = rate
+        if tariff_row is None and vehicle_type_id is not None:
             chosen = await db.get(VehicleType, vehicle_type_id)
             if chosen is not None:
                 chosen_wire_id = await vehicle_id_of(db, chosen.id)
@@ -1081,6 +1096,7 @@ class GateCycleService:
         lost: bool = False,
         vehicle_id: int | None = None,
         vehicle_type_id: UUID | None = None,
+        parking_rate_id: UUID | None = None,
         payment_method: str | None = None,
         open_barrier: bool = True,
     ) -> GateOutResult:
@@ -1124,7 +1140,11 @@ class GateCycleService:
                 lost=lost,
                 vehicle_id=vehicle_id,
                 vehicle_type_id=vehicle_type_id,
+                parking_rate_id=parking_rate_id,
             )
+
+            if quote.status == STATUS_NOT_FOUND:
+                return quote
 
             # Optional strictness. Off by default, because on site the plates
             # genuinely disagree and refusing would strand real drivers.
@@ -1251,6 +1271,7 @@ class GateCycleService:
         db: AsyncSession,
         *,
         vehicle_type_id: UUID | None = None,
+        parking_rate_id: UUID | None = None,
         vehicle_id: int | None = None,
     ) -> tuple[rates.Tariff | None, UUID | None, str | None]:
         """The lost-ticket tariff for a class — ``(tariff, type_uuid, error)``.
@@ -1258,6 +1279,15 @@ class GateCycleService:
         Shared by :meth:`lost_ticket` and :meth:`preview_fee` so a preview can
         never drift from what settling actually charges.
         """
+        if parking_rate_id is not None:
+            rate = await db.get(ParkingRate, parking_rate_id)
+            if rate is None or rate.status != RateStatus.ACTIVE:
+                return None, None, "Tarif parkir tidak ditemukan atau nonaktif"
+            chosen = await db.get(VehicleType, rate.vehicle_type_id)
+            if chosen is None or chosen.status != VehicleStatus.ACTIVE:
+                return None, None, "Jenis kendaraan tidak ditemukan atau nonaktif"
+            return rates.Tariff.from_row(rate), chosen.id, None
+
         if vehicle_type_id is not None:
             chosen = await db.get(VehicleType, vehicle_type_id)
             if chosen is None or chosen.status != VehicleStatus.ACTIVE:
@@ -1282,6 +1312,7 @@ class GateCycleService:
         plate: str | None,
         vehicle_id: int | None = None,
         vehicle_type_id: UUID | None = None,
+        parking_rate_id: UUID | None = None,
         payment_method: str | None = None,
         admin_id: int | None = None,
         shift_id: int | None = None,
@@ -1296,8 +1327,9 @@ class GateCycleService:
         ``park_transactions``. If the plate still has an open session, that
         session is settled as lost instead of leaving a duplicate behind.
 
+        ``parking_rate_id`` (an exact tarif parkir) wins, then
         ``vehicle_type_id`` addresses an admin-managed class directly; the
-        legacy wire ``vehicle_id`` (1-4) still works when no UUID is given.
+        legacy wire ``vehicle_id`` (1-4) still works when neither is given.
         """
         plate_norm = normalize_plate(plate)
         if not plate_norm:
@@ -1310,6 +1342,7 @@ class GateCycleService:
             tariff, vehicle_type_uuid, err = await self._lost_tariff_for_class(
                 session,
                 vehicle_type_id=vehicle_type_id,
+                parking_rate_id=parking_rate_id,
                 vehicle_id=vehicle_id,
             )
             if tariff is None or err is not None:
@@ -1440,6 +1473,7 @@ class GateCycleService:
         db: AsyncSession,
         *,
         vehicle_type_id: UUID | None = None,
+        parking_rate_id: UUID | None = None,
         vehicle_id: int | None = None,
         explicit_total: float | None = None,
     ) -> tuple[UUID | None, int, str | None]:
@@ -1449,6 +1483,18 @@ class GateCycleService:
         admin-configured flat price wins; fall back to the class's rate table,
         then to the legacy seed prices for the four wired classes.
         """
+        if parking_rate_id is not None:
+            rate = await db.get(ParkingRate, parking_rate_id)
+            if rate is None or rate.status != RateStatus.ACTIVE:
+                return None, 0, "Tarif parkir tidak ditemukan atau nonaktif"
+            chosen = await db.get(VehicleType, rate.vehicle_type_id)
+            if chosen is None or chosen.status != VehicleStatus.ACTIVE:
+                return None, 0, "Jenis kendaraan tidak ditemukan atau nonaktif"
+            charge = explicit_total
+            if charge is None:
+                charge = rate.base_price
+            return chosen.id, int(charge), None
+
         if vehicle_type_id is not None:
             chosen = await db.get(VehicleType, vehicle_type_id)
             if chosen is None or chosen.status != VehicleStatus.ACTIVE:
@@ -1476,6 +1522,7 @@ class GateCycleService:
         *,
         kind: str,
         vehicle_type_id: UUID | None = None,
+        parking_rate_id: UUID | None = None,
         vehicle_id: int | None = None,
     ) -> GateOutResult:
         """What would a manual / lost ticket cost? Read-only — nothing written.
@@ -1488,6 +1535,7 @@ class GateCycleService:
                 _uuid, charge, err = await self._manual_charge_for_class(
                     session,
                     vehicle_type_id=vehicle_type_id,
+                    parking_rate_id=parking_rate_id,
                     vehicle_id=vehicle_id,
                 )
                 if err is not None:
@@ -1502,6 +1550,7 @@ class GateCycleService:
             tariff, _uuid, err = await self._lost_tariff_for_class(
                 session,
                 vehicle_type_id=vehicle_type_id,
+                parking_rate_id=parking_rate_id,
                 vehicle_id=vehicle_id,
             )
             if tariff is None or err is not None:
@@ -1521,6 +1570,7 @@ class GateCycleService:
         police_number: str,
         vehicle_id: int | None = None,
         vehicle_type_id: UUID | None = None,
+        parking_rate_id: UUID | None = None,
         payment_method: str | None = None,
         admin_id: int | None = None,
         shift_id: int | None = None,
@@ -1536,8 +1586,9 @@ class GateCycleService:
         class's configured flat price is charged and marked lunas immediately
         — there is nothing left to settle.
 
+        ``parking_rate_id`` (an exact tarif parkir) wins, then
         ``vehicle_type_id`` addresses an admin-managed class directly; the
-        legacy wire ``vehicle_id`` (1-4) still works when no UUID is given.
+        legacy wire ``vehicle_id`` (1-4) still works when neither is given.
         """
         plate = normalize_plate(police_number)
         if not plate:
@@ -1554,6 +1605,7 @@ class GateCycleService:
             vehicle_type_uuid, charge, err = await self._manual_charge_for_class(
                 session,
                 vehicle_type_id=vehicle_type_id,
+                parking_rate_id=parking_rate_id,
                 vehicle_id=vehicle_id,
                 explicit_total=total,
             )
