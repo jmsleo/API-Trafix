@@ -60,6 +60,10 @@ async def create_parking_rate(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="vehicle_type_id tidak merujuk ke jenis kendaraan yang ada",
         )
+    if await crud.get_by_name(db, payload.name) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan"
+        )
     try:
         db_obj = await crud.create(db, payload)
     except IntegrityError:
@@ -94,6 +98,12 @@ async def update_parking_rate(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="vehicle_type_id tidak merujuk ke jenis kendaraan yang ada",
+            )
+
+    if payload.name is not None and payload.name != db_obj.name:
+        if await crud.get_by_name(db, payload.name) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Nama sudah digunakan"
             )
 
     try:
