@@ -20,6 +20,17 @@ def _to_minutes(t: time) -> int:
     return t.hour * 60 + t.minute
 
 
+def shift_covers_datetime(
+    dt: datetime, start: time, finish: time, crosses_midnight: bool
+) -> bool:
+    """Whether ``dt``'s clock time falls inside the shift's window."""
+    minute = dt.hour * 60 + dt.minute
+    return any(
+        minute in covered
+        for covered in shift_covers_minutes(start, finish, crosses_midnight)
+    )
+
+
 def shift_covers_minutes(
     start: time, finish: time, crosses_midnight: bool
 ) -> tuple[set[int], ...]:

@@ -1,5 +1,6 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -15,29 +16,29 @@ from api_trafix.crud import gate as gate_crud
 from api_trafix.crud import operator_shift_assignment as assignment_crud
 from api_trafix.crud import operator_session as crud
 from api_trafix.crud import shift as shift_crud
-from api_trafix.models import Gate, GateType, OperatorSessionStatus, User, UserRole
+from api_trafix.models import Gate, GateType, OperatorSessionStatus, Shift, User, UserRole
 from api_trafix.services.audit import log_action
-from api_trafix.services.shift_overlap import shift_covers_datetime
 from api_trafix.schemas.operator_session import (
     OperatorSessionPage,
     OperatorSessionRead,
     OperatorSessionStart,
 )
+from api_trafix.services.shift_overlap import shift_covers_datetime
+
+WIB = ZoneInfo("Asia/Jakarta")
 
 router = APIRouter(prefix="/operator-sessions", tags=["Operator Sessions"])
-
-WIB = timezone(timedelta(hours=7))
 
 
 async def _resolve_shift(
     db: AsyncSession, operator: User, payload: OperatorSessionStart
-):
-    """Resolve and validate the shift a session opens on.
+) -> Shift:
+    """Resolve the shift a session starts against.
 
-    When ``payload.shift_id`` is given it must still be one the operator is
-    assigned to AND its window must cover the current WIB time — an explicit
-    id never bypasses the out-of-shift guard. When omitted, the current
-    assigned shift (the one covering now) is resolved automatically.
+    Operators do not pick a shift: an explicit ``shift_id`` (admin tools, tests)
+    must be one they're actively assigned to; an omitted ``shift_id`` is resolved
+    from the operator's ACTIVE assignments whose time window covers the current
+    moment — logging in outside that window is rejected with a warning.
     """
     now = datetime.now(WIB)
 
@@ -167,7 +168,6 @@ async def start_operator_session(
     operator: User = Depends(get_current_operator),
 ):
     shift = await _resolve_shift(db, operator, payload)
-
     gate = await _resolve_exit_gate(db, payload.gate_id)
 
     active = await crud.get_active_for_operator(db, operator.id)
