@@ -277,6 +277,8 @@ CREATE TABLE IF NOT EXISTS parking_rates (
     created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_parking_rates_name_lower
+    ON parking_rates (lower(name));
 
 -- member_vehicles
 CREATE TABLE IF NOT EXISTS member_vehicles (

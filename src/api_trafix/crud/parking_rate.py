@@ -41,6 +41,13 @@ async def get_by_id(db: AsyncSession, parking_rate_id: uuid.UUID) -> ParkingRate
     return result.scalar_one_or_none()
 
 
+async def get_by_name(db: AsyncSession, name: str) -> ParkingRate | None:
+    result = await db.execute(
+        select(ParkingRate).where(func.lower(ParkingRate.name) == name.strip().lower())
+    )
+    return result.scalar_one_or_none()
+
+
 async def update_status(
     db: AsyncSession, db_obj: ParkingRate, status: RateStatus
 ) -> ParkingRate:
